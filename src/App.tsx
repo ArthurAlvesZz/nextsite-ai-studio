@@ -69,18 +69,13 @@ const cases = [
 
 function MainApp() {
   const { settings } = useAgencySettings();
-  const [isReady, setIsReady] = useState(false);
-  const [videoError, setVideoError] = useState(false);
 
-  const handleVideoEnd = () => {
-    setIsReady(true);
-    // Refresh ScrollTrigger after the layout changes
+  useEffect(() => {
+    // Initial ScrollTrigger refresh
     setTimeout(() => {
       ScrollTrigger.refresh();
     }, 100);
-  };
 
-  useEffect(() => {
     // Cinematic Matrix Background Logic
     const bgConstruct = document.querySelector('#bg-construct');
     const bgProcessing = document.querySelector('#bg-processing');
@@ -122,41 +117,11 @@ function MainApp() {
 
   return (
     <div className="font-body selection:bg-primary selection:text-on-primary min-h-screen bg-transparent text-on-background relative">
-      {/* Video Preloader */}
-      {!isReady && (
-        <div className="fixed inset-0 w-full h-full z-[9999] bg-black flex items-center justify-center">
-          <video
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-            onEnded={handleVideoEnd}
-            onError={() => {
-              console.warn("Video failed to load. Skipping preloader.");
-              setVideoError(true);
-              handleVideoEnd();
-            }}
-          >
-            {/* Vídeo do Cloudinary */}
-            <source src={settings.preloaderVideoUrl} type="video/mp4" />
-          </video>
-          
-          {/* Fallback skip button */}
-          <button 
-            onClick={handleVideoEnd}
-            className="absolute bottom-8 right-8 text-white/50 hover:text-white text-xs tracking-widest uppercase font-mono z-10 transition-colors"
-          >
-            Pular Intro
-          </button>
-        </div>
-      )}
-
-      {/* Main Content */}
-      <div id="main-content" className={`transition-opacity duration-1000 ${isReady ? 'opacity-100' : 'opacity-0'}`}>
+      <div id="main-content" className="transition-opacity duration-1000 opacity-100">
         <ImmersiveBackground />
         <div className="relative z-10">
           <Navbar />
-          <Hero isReady={isReady} settings={settings} />
+          <Hero isReady={true} settings={settings} />
           <Results settings={settings} />
           <Transformation settings={settings} />
           <Workflow settings={settings} />
