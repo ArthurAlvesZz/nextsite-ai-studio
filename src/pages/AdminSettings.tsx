@@ -5,7 +5,7 @@ import GlobalSearch from '../components/GlobalSearch';
 import { useEmployees, TeamMember } from '../hooks/useEmployees';
 import { useAgencySettings, PortfolioCase, WorkflowStep } from '../hooks/useAgencySettings';
 import { useGoalSettings } from '../hooks/useGoalSettings';
-import { auth, db } from '../firebase';
+import { auth, db, secondaryAuth } from '../firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -80,7 +80,7 @@ export default function AdminSettings() {
       updateMember(editingMember.id, formData);
     } else {
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, `${formData.login}@nextcreatives.co`, formData.password);
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, `${formData.login}@nextcreatives.co`, formData.password);
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           role: formData.role === 'Admin' ? 'admin' : 'editor',
           name: formData.name,

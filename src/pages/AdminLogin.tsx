@@ -3,18 +3,21 @@ import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
+import { useGlobalAuth } from '../contexts/AuthContext';
 
 export default function AdminLogin() {
   const [accessId, setAccessId] = useState('');
   const [securityKey, setSecurityKey] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { loginMasterAdmin } = useGlobalAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Check for master admin credentials first
     if (accessId === '15599873676' && securityKey === '963369') {
+      loginMasterAdmin();
       navigate('/admin/dashboard');
       return;
     }
