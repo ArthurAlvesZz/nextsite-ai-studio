@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
+import { auth } from '../firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 
 export default function AdminLogin() {
   const [accessId, setAccessId] = useState('');
   const [securityKey, setSecurityKey] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { adminProfile } = useAuth();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validPassword = adminProfile.password || '963369';
-    if (accessId === adminProfile.phone && securityKey === validPassword) {
+    try {
+      await signInWithEmailAndPassword(auth, `${accessId}@nextcreatives.co`, securityKey);
       navigate('/admin/dashboard');
-    } else {
+    } catch (e) {
+      console.error("Erro ao logar no Firebase Auth:", e);
       setError('Invalid Access ID or Security Key');
     }
   };

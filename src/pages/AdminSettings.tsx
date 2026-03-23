@@ -5,6 +5,9 @@ import GlobalSearch from '../components/GlobalSearch';
 import { useEmployees, TeamMember } from '../hooks/useEmployees';
 import { useAgencySettings, PortfolioCase, WorkflowStep } from '../hooks/useAgencySettings';
 import { useGoalSettings } from '../hooks/useGoalSettings';
+import { auth, db } from '../firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 
 export default function AdminSettings() {
   const { teamMembers, addMember, updateMember, deleteMember } = useEmployees();
@@ -70,13 +73,25 @@ export default function AdminSettings() {
     setIsDeleting(false);
   };
 
-  const handleSaveMember = (e: React.FormEvent) => {
+  const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (editingMember) {
       updateMember(editingMember.id, formData);
     } else {
-      addMember(formData);
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, `${formData.login}@nextcreatives.co`, formData.password);
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          role: formData.role === 'Admin' ? 'admin' : 'editor',
+          name: formData.name,
+          login: formData.login
+        });
+        addMember(formData);
+      } catch (e) {
+        console.error("Erro ao criar usuário no Firebase Auth:", e);
+        alert("Erro ao criar usuário: " + (e instanceof Error ? e.message : 'Erro desconhecido'));
+        return;
+      }
     }
     handleCloseModal();
   };
