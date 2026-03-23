@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "AgencySettings": {
+      "title": "Agency Settings",
+      "description": "Global settings for the agency landing page",
+      "type": "object",
+      "properties": {
+        "heroTitle": { "type": "string" },
+        "heroDescription": { "type": "string" },
+        "preloaderVideoUrl": { "type": "string" },
+        "portfolioCases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "videoSrc": { "type": "string" },
+              "tituloDaCampanha": { "type": "string" },
+              "metricaPrincipal": { "type": "string" },
+              "descricao": { "type": "string" },
+              "cliente": { "type": "string" }
+            }
+          }
+        },
+        "transformationPanel1Image": { "type": "string" },
+        "transformationPanel3Video": { "type": "string" },
+        "workflowSteps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "whatsappMockupImage1": { "type": "string" },
+        "whatsappMockupImage2": { "type": "string" }
+      }
+    },
+    "User": {
+      "title": "User",
+      "description": "Admin users",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "A harvested lead from the search tool",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "site": { "type": "string" },
+        "plataformas": { "type": "string" },
+        "contatos": {
+          "type": "object",
+          "properties": {
+            "instagram": { "type": "string" },
+            "whatsapp": { "type": "string" }
+          }
+        },
+        "termoBusca": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      }
+    },
+    "Dork": {
+      "title": "Dork",
+      "description": "A saved search term for automated lead harvesting",
+      "type": "object",
+      "properties": {
+        "termo": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "settings/{settingId}": {
+      "schema": "AgencySettings",
+      "description": "Singleton document for agency settings (e.g., settings/global)"
+    },
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Admin users of the system"
+    },
+    "leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Harvested leads saved by admins"
+    },
+    "dorks/{dorkId}": {
+      "schema": "Dork",
+      "description": "Saved search terms for automated harvesting"
+    }
+  }
+}
