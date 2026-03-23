@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminLogin from './pages/AdminLogin';
@@ -1390,10 +1390,25 @@ function Pricing() {
   );
 }
 
+function TitleUpdater() {
+  const location = useLocation();
+  
+  useEffect(() => {
+    if (location.pathname.startsWith('/admin')) {
+      document.title = 'Painel Admin Next';
+    } else {
+      document.title = 'Next Creatives | Studio';
+    }
+  }, [location]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <TitleUpdater />
         <Routes>
           <Route path="/" element={<MainApp />} />
           <Route path="/admin" element={<AdminLogin />} />
