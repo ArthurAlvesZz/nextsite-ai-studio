@@ -5,6 +5,7 @@ export interface TeamMember {
   name: string;
   role: string;
   login: string;
+  password?: string;
   lastLogin: string;
   initials: string;
   monthlySalesGoal?: number;
@@ -21,6 +22,7 @@ export function useEmployees() {
         name: 'Admin Master',
         role: 'Admin',
         login: '15599873676',
+        password: 'admin',
         lastLogin: 'Agora',
         initials: 'AM'
       }

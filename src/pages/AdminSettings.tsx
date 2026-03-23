@@ -14,7 +14,7 @@ export default function AdminSettings() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGoalsModalOpen, setIsGoalsModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
-  const [formData, setFormData] = useState({ name: '', role: 'Editor', login: '' });
+  const [formData, setFormData] = useState({ name: '', role: 'Editor', login: '', password: '' });
   const [activeTab, setActiveTab] = useState('perfil');
   const [isDeleting, setIsDeleting] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -56,10 +56,10 @@ export default function AdminSettings() {
   const handleOpenModal = (member?: TeamMember) => {
     if (member) {
       setEditingMember(member);
-      setFormData({ name: member.name, role: member.role, login: member.login });
+      setFormData({ name: member.name, role: member.role, login: member.login, password: member.password || '' });
     } else {
       setEditingMember(null);
-      setFormData({ name: '', role: 'Editor', login: '' });
+      setFormData({ name: '', role: 'Editor', login: '', password: '' });
     }
     setIsModalOpen(true);
   };
@@ -681,6 +681,17 @@ export default function AdminSettings() {
                   onChange={(e) => setFormData({...formData, login: e.target.value})}
                   className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light"
                   placeholder="Ex: joao.silva"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold mb-2">Senha</label>
+                <input 
+                  type="password" 
+                  required={!editingMember}
+                  value={formData.password}
+                  onChange={(e) => setFormData({...formData, password: e.target.value})}
+                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light"
+                  placeholder="********"
                 />
               </div>
               <div>
