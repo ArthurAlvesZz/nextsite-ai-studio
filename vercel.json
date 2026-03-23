@@ -4,5 +4,11 @@
       "path": "/api/cron/buscar-leads",
       "schedule": "0 0 * * *"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }
