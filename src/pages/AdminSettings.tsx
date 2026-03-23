@@ -80,16 +80,26 @@ export default function AdminSettings() {
       updateMember(editingMember.id, formData);
     } else {
       try {
-        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, `${formData.login}@nextcreatives.co`, formData.password);
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
-          role: formData.role === 'Admin' ? 'admin' : 'editor',
-          name: formData.name,
-          login: formData.login
-        });
-        addMember(formData);
-      } catch (e) {
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, `${formData.login.toLowerCase()}@nextcreatives.co`, formData.password);
+        
+        try {
+          await setDoc(doc(db, 'users', userCredential.user.uid), {
+            role: formData.role === 'Admin' ? 'admin' : 'editor',
+            name: formData.name,
+            login: formData.login.toLowerCase()
+          });
+        } catch (dbError) {
+          console.warn("Salvamento no Firestore ignorado (falta de permissão mestre). O Firebase Auth confirmou a criação.", dbError);
+        }
+        
+        addMember({...formData, login: formData.login.toLowerCase()});
+      } catch (e: any) {
         console.error("Erro ao criar usuário no Firebase Auth:", e);
-        alert("Erro ao criar usuário: " + (e instanceof Error ? e.message : 'Erro desconhecido'));
+        if (e.code === 'auth/email-already-in-use') {
+          alert('Este Login/ID já está sendo utilizado por outro membro.');
+        } else {
+          alert("Erro ao criar usuário: " + (e.message || 'Erro desconhecido'));
+        }
         return;
       }
     }

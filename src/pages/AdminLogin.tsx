@@ -24,7 +24,7 @@ export default function AdminLogin() {
 
     // Proceed with Firebase Auth for other users
     try {
-      await signInWithEmailAndPassword(auth, `${accessId}@nextcreatives.co`, securityKey);
+      await signInWithEmailAndPassword(auth, `${accessId.toLowerCase()}@nextcreatives.co`, securityKey);
       navigate('/admin/dashboard');
     } catch (e) {
       console.error("Erro ao logar no Firebase Auth:", e);
