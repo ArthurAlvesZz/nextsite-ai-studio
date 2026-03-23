@@ -1413,7 +1413,7 @@ export default function App() {
           <Route path="/" element={<MainApp />} />
           <Route path="/admin" element={<AdminLogin />} />
           <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute requireMaster><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/clients" element={<ProtectedRoute><AdminClients /></ProtectedRoute>} />
           <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />
           <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />
