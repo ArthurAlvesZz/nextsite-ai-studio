@@ -22,7 +22,7 @@ export default function AdminLogin() {
         const cred = await signInWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
         // Força a existência (upsert) do Owner na colection, caso a conta Auth já exista mas o BD não.
         await setDoc(doc(db, 'users', cred.user.uid), {
-          name: 'Admin Master',
+          name: 'Arthur Fagundes',
           role: 'admin',
           login: '15599873676'
         }, { merge: true });
@@ -31,7 +31,7 @@ export default function AdminLogin() {
           try {
             const cred = await createUserWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
             await setDoc(doc(db, 'users', cred.user.uid), {
-              name: 'Admin Master',
+              name: 'Arthur Fagundes',
               role: 'admin',
               login: '15599873676'
             });
@@ -47,7 +47,16 @@ export default function AdminLogin() {
 
     // Proceed with Firebase Auth for other users
     try {
-      await signInWithEmailAndPassword(auth, `${accessId.toLowerCase()}@nextcreatives.co`, securityKey);
+      const cred = await signInWithEmailAndPassword(auth, `${accessId.toLowerCase()}@nextcreatives.co`, securityKey);
+      
+      // Auto-Sync fallback: se a conta foi criada pelo painel do FB, forçamos o BD a tê-la:
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        login: accessId.toLowerCase(),
+        name: accessId, // fallback temporario ate a pessoa configurar ou Mestre configurar
+        role: 'editor',
+        lastActive: Date.now()
+      }, { merge: true });
+
       navigate('/admin/dashboard');
     } catch (e) {
       console.error("Erro ao logar no Firebase Auth:", e);
