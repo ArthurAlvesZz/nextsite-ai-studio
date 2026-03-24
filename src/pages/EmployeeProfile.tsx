@@ -19,95 +19,45 @@ import {
 import { startOfMonth, endOfMonth, isWithinInterval, parse, isSameDay, startOfWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../hooks/useAuth';
-import { useGlobalAuth } from '../contexts/AuthContext';
 
 export default function EmployeeProfile() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { teamMembers, updateMember } = useEmployees();
+  const { teamMembers } = useEmployees();
   const { sales } = useSales();
   const { demands } = useDemands();
   const { goalSettings } = useGoalSettings();
   const { adminProfile, updateAdminProfile } = useAuth();
-  const { currentUser, isMasterAdmin } = useGlobalAuth();
 
   const employee = teamMembers.find(m => m.id === id);
-  const isOwnerProfile = employee?.login === '15599873676';
-  const isOwnProfile = employee?.id === currentUser?.uid || (isMasterAdmin && isOwnerProfile);
+  const isOwnProfile = employee?.id === '1'; // Assuming '1' is the logged-in admin for now
 
   const [isEditing, setIsEditing] = React.useState(false);
-  const [avatarUrl, setAvatarUrl] = React.useState(employee?.avatarUrl || '');
-  const [editName, setEditName] = React.useState(employee?.name || '');
+  const [avatarUrl, setAvatarUrl] = React.useState(adminProfile.avatarUrl);
   const [currentPassword, setCurrentPassword] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
   const [confirmPassword, setConfirmPassword] = React.useState('');
   const [message, setMessage] = React.useState({ type: '', text: '' });
-  const [currentTime, setCurrentTime] = React.useState(Date.now());
-
-  React.useEffect(() => {
-    // Para atualizar o status da bolinha de tempo real
-    const interval = setInterval(() => setCurrentTime(Date.now()), 60000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 256;
-        const MAX_HEIGHT = 256;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-          setAvatarUrl(dataUrl);
-        }
-      };
-      if (event.target?.result) {
-        img.src = event.target.result as string;
-      }
-    };
-    reader.readAsDataURL(file);
-  };
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!employee) return;
     
-    // Password validation if they tried to change it
+    // Password validation
     if (newPassword) {
       if (newPassword !== confirmPassword) {
         setMessage({ type: 'error', text: 'As novas senhas não coincidem.' });
         return;
       }
+      const validPassword = adminProfile.password || '963369';
+      if (currentPassword !== validPassword) {
+        setMessage({ type: 'error', text: 'Senha atual incorreta.' });
+        return;
+      }
+      // Update password
+      updateAdminProfile({ avatarUrl, password: newPassword });
+    } else {
+      updateAdminProfile({ avatarUrl });
     }
-
-    updateMember(employee.id, { 
-      avatarUrl, 
-      password: newPassword || employee.password,
-      name: isOwnerProfile ? editName : employee.name
-    });
 
     setMessage({ type: 'success', text: 'Perfil atualizado com sucesso!' });
     setIsEditing(false);
@@ -284,8 +234,8 @@ export default function EmployeeProfile() {
             <div className="relative z-10 flex items-center gap-8">
               <div className={`w-24 h-24 rounded-2xl bg-gradient-to-br from-secondary to-primary p-[2px] ${isOwnProfile ? 'relative group' : ''}`}>
                 <div className="w-full h-full bg-[#050505] rounded-[14px] flex items-center justify-center overflow-hidden">
-                  {employee.avatarUrl ? (
-                    <img src={employee.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+                  {isOwnProfile && adminProfile.avatarUrl ? (
+                    <img src={adminProfile.avatarUrl} alt="Profile" className="w-full h-full object-cover" />
                   ) : (
                     <span className="text-3xl font-headline font-bold text-transparent bg-clip-text bg-gradient-to-r from-secondary to-primary">
                       {employee.initials}
@@ -297,33 +247,18 @@ export default function EmployeeProfile() {
                     onClick={() => setIsEditing(true)}
                     className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-[14px] flex items-center justify-center"
                   >
-                    <span className="material-symbols-outlined text-white">photo_camera</span>
+                    <span className="material-symbols-outlined text-white">edit</span>
                   </button>
                 )}
               </div>
               
               <div className="flex-1">
                 <div className="flex items-center gap-4 mb-2">
-                  <h1 className="text-4xl font-headline font-extrabold tracking-tight text-white flex items-center gap-3">
-                    {employee.name}
-                    {isOwnerProfile && (
-                      <span className="px-3 py-1 bg-secondary/10 border border-secondary/20 text-secondary text-sm font-bold uppercase rounded-lg tracking-wider shadow-[0_0_10px_rgba(203,123,255,0.2)]">#Owner</span>
-                    )}
-                  </h1>
-                  
-                  {(() => {
-                    const isOnline = employee.lastActive && (currentTime - employee.lastActive < 2 * 60 * 1000);
-                    const isIdle = !isOnline && employee.lastActive && (currentTime - employee.lastActive < 15 * 60 * 1000);
-                    
-                    return (
-                      <div className={`px-3 py-1 rounded-full border flex items-center gap-2 ${isOnline ? 'bg-emerald-500/10 border-emerald-500/20' : isIdle ? 'bg-orange-500/10 border-orange-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
-                        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : isIdle ? 'bg-orange-500' : 'bg-red-500/50'}`}></div>
-                        <span className={`text-[10px] font-bold uppercase tracking-widest ${isOnline ? 'text-emerald-400' : isIdle ? 'text-orange-400' : 'text-red-400'}`}>
-                          {isOnline ? 'Online' : isIdle ? 'Ausente' : 'Offline'}
-                        </span>
-                      </div>
-                    );
-                  })()}
+                  <h1 className="text-4xl font-headline font-extrabold tracking-tight text-white">{employee.name}</h1>
+                  <div className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Online</span>
+                  </div>
                 </div>
                 <p className="text-white/60 text-lg font-light">{employee.role}</p>
               </div>
@@ -463,33 +398,16 @@ export default function EmployeeProfile() {
               <h3 className="text-xl font-headline font-bold text-white border-b border-white/10 pb-4">Configurações da Conta</h3>
               
               <div className="space-y-6">
-                
-                {isOwnerProfile && (
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2 font-bold">Nome de Exibição (#Owner)</label>
-                    <input 
-                      type="text" 
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-secondary transition-all outline-none"
-                    />
-                  </div>
-                )}
-
                 <div>
-                  <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2 font-bold">Foto de Perfil</label>
-                  <label className="w-full h-32 bg-white/[0.03] border-2 border-dashed border-white/10 hover:border-secondary/50 rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all group overflow-hidden relative">
-                    {avatarUrl ? (
-                       <img src={avatarUrl} alt="Preview" className="w-full h-full object-contain bg-black/50" />
-                    ) : (
-                       <>
-                         <span className="material-symbols-outlined text-white/20 group-hover:text-secondary mb-2 transition-colors">cloud_upload</span>
-                         <span className="text-xs text-white/40 group-hover:text-white transition-colors">Clique ou arraste uma foto</span>
-                       </>
-                    )}
-                    <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                  </label>
-                  <p className="text-xs text-white/40 mt-2">Formatos suportados: JPG, PNG. O envio comprime e otimiza sua imagem nativamente.</p>
+                  <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2 font-bold">URL da Foto de Perfil</label>
+                  <input 
+                    type="url" 
+                    value={avatarUrl}
+                    onChange={(e) => setAvatarUrl(e.target.value)}
+                    placeholder="https://exemplo.com/foto.jpg"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-secondary focus:ring-1 focus:ring-secondary outline-none transition-all"
+                  />
+                  <p className="text-xs text-white/40 mt-2">Insira o link direto para uma imagem (JPG, PNG).</p>
                 </div>
 
                 <div className="pt-6 border-t border-white/10 space-y-6">

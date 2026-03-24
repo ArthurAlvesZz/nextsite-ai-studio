@@ -1,62 +1,27 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { auth, db } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
-import { useGlobalAuth } from '../contexts/AuthContext';
+import { auth } from '../firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 
 export default function AdminLogin() {
   const [accessId, setAccessId] = useState('');
   const [securityKey, setSecurityKey] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { loginMasterAdmin } = useGlobalAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Check for master admin credentials first
     if (accessId === '15599873676' && securityKey === '963369') {
-      try {
-        const cred = await signInWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
-        // Força a existência (upsert) do Owner na colection, caso a conta Auth já exista mas o BD não.
-        await setDoc(doc(db, 'users', cred.user.uid), {
-          name: 'Arthur Fagundes',
-          role: 'admin',
-          login: '15599873676'
-        }, { merge: true });
-      } catch (e: any) {
-        if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
-          try {
-            const cred = await createUserWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
-            await setDoc(doc(db, 'users', cred.user.uid), {
-              name: 'Arthur Fagundes',
-              role: 'admin',
-              login: '15599873676'
-            });
-          } catch (createErr) {
-            console.error('Ignorando erro master fallback', createErr);
-          }
-        }
-      }
-      loginMasterAdmin();
       navigate('/admin/dashboard');
       return;
     }
 
     // Proceed with Firebase Auth for other users
     try {
-      const cred = await signInWithEmailAndPassword(auth, `${accessId.toLowerCase()}@nextcreatives.co`, securityKey);
-      
-      // Auto-Sync fallback: se a conta foi criada pelo painel do FB, forçamos o BD a tê-la:
-      await setDoc(doc(db, 'users', cred.user.uid), {
-        login: accessId.toLowerCase(),
-        name: accessId, // fallback temporario ate a pessoa configurar ou Mestre configurar
-        role: 'editor',
-        lastActive: Date.now()
-      }, { merge: true });
-
+      await signInWithEmailAndPassword(auth, `${accessId}@nextcreatives.co`, securityKey);
       navigate('/admin/dashboard');
     } catch (e) {
       console.error("Erro ao logar no Firebase Auth:", e);

@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useAuth } from '../hooks/useAuth';
-import { useGlobalAuth } from '../contexts/AuthContext';
 
 interface AdminSidebarProps {
   activePage: 'dashboard' | 'vendas' | 'clientes' | 'videos' | 'tools' | 'settings' | 'team' | 'leads';
@@ -13,16 +12,10 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
   const [showLogout, setShowLogout] = useState(false);
   const navigate = useNavigate();
   const { adminProfile } = useAuth();
-  const { currentUser, isMasterAdmin, logout } = useGlobalAuth();
 
   const handleLogout = () => {
-    logout();
     navigate('/admin');
   };
-
-  const displayName = isMasterAdmin ? adminProfile.name : (currentUser?.email ? currentUser.email.split('@')[0].toUpperCase() : 'Colaborador');
-  const displayPhone = isMasterAdmin ? adminProfile.phone : 'Acesso Equipe';
-  const displayAvatar = isMasterAdmin ? adminProfile.avatarUrl : null;
 
   return (
     <aside className="h-screen w-64 fixed left-0 top-0 border-r border-white/10 bg-white/[0.02] backdrop-blur-2xl flex flex-col py-8 z-50">
@@ -93,19 +86,17 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
           <span className="material-symbols-outlined text-lg">construction</span>
           <span className="font-headline font-bold text-xs uppercase tracking-widest">Ferramentas</span>
         </Link>
-        {isMasterAdmin && (
-          <Link 
-            to="/admin/settings" 
-            className={`flex items-center gap-3 px-4 py-3 rounded-xl mx-2 transition-all ${
-              activePage === 'settings' 
-                ? 'text-on-secondary bg-gradient-to-r from-secondary to-primary shadow-[0_0_20px_rgba(233,179,255,0.2)]' 
-                : 'text-white/50 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <span className="material-symbols-outlined text-lg">settings</span>
-            <span className="font-headline font-bold text-xs uppercase tracking-widest">Ajustes</span>
-          </Link>
-        )}
+        <Link 
+          to="/admin/settings" 
+          className={`flex items-center gap-3 px-4 py-3 rounded-xl mx-2 transition-all ${
+            activePage === 'settings' 
+              ? 'text-on-secondary bg-gradient-to-r from-secondary to-primary shadow-[0_0_20px_rgba(233,179,255,0.2)]' 
+              : 'text-white/50 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <span className="material-symbols-outlined text-lg">settings</span>
+          <span className="font-headline font-bold text-xs uppercase tracking-widest">Ajustes</span>
+        </Link>
       </nav>
       <div className="px-6 mt-auto relative">
         <AnimatePresence>
@@ -141,16 +132,16 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
           onClick={() => setShowLogout(!showLogout)}
           className={`bg-white/[0.02] border border-white/10 p-4 rounded-xl flex items-center gap-3 cursor-pointer transition-all hover:bg-white/[0.05] ${showLogout ? 'border-secondary/50 ring-1 ring-secondary/20' : ''}`}
         >
-          {displayAvatar ? (
-            <img src={displayAvatar} alt="Profile" className="h-10 w-10 rounded-full object-cover border border-white/10 shadow-lg" />
+          {adminProfile.avatarUrl ? (
+            <img src={adminProfile.avatarUrl} alt="Profile" className="h-10 w-10 rounded-full object-cover border border-white/10 shadow-lg" />
           ) : (
             <div className="h-10 w-10 rounded-full bg-gradient-to-br from-secondary to-primary flex items-center justify-center font-headline font-bold text-on-secondary text-sm shadow-lg">
-              {displayName.substring(0, 2).toUpperCase()}
+              {adminProfile.name.substring(0, 2).toUpperCase()}
             </div>
           )}
           <div className="overflow-hidden flex-1">
-            <p className="text-sm font-headline font-bold text-white truncate">{displayName}</p>
-            <p className="text-[10px] uppercase tracking-widest text-secondary/70 truncate mt-0.5">{displayPhone}</p>
+            <p className="text-sm font-headline font-bold text-white truncate">{adminProfile.name}</p>
+            <p className="text-[10px] uppercase tracking-widest text-secondary/70 truncate mt-0.5">{adminProfile.phone}</p>
           </div>
           <span className={`material-symbols-outlined text-white/20 transition-transform duration-300 ${showLogout ? 'rotate-180' : ''}`}>expand_less</span>
         </div>

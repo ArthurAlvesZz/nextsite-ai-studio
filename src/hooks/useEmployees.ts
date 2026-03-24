@@ -1,6 +1,4 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 
 export interface TeamMember {
   id: string;
@@ -8,60 +6,60 @@ export interface TeamMember {
   role: string;
   login: string;
   password?: string;
-  lastLogin?: string;
-  lastActive?: number;
+  lastLogin: string;
   initials: string;
   monthlySalesGoal?: number;
   monthlyVideoGoal?: number;
-  avatarUrl?: string;
 }
 
 export function useEmployees() {
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(() => {
+    const saved = localStorage.getItem('teamMembers');
+    if (saved) return JSON.parse(saved);
+    return [
+      {
+        id: '1',
+        name: 'Admin Master',
+        role: 'Admin',
+        login: '15599873676',
+        password: 'admin',
+        lastLogin: 'Agora',
+        initials: 'AM'
+      }
+    ];
+  });
 
   useEffect(() => {
-    // Sincronizar ao vivo com a coleção 'users' do Firestore
-    const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const members: TeamMember[] = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        members.push({
-          id: docSnap.id,
-          name: data.name || '',
-          role: data.role || 'Usuário',
-          login: data.login || '',
-          password: data.password || '',
-          lastActive: data.lastActive || 0,
-          lastLogin: data.lastActive ? 'Recentemente' : 'Nunca',
-          initials: data.name ? data.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : 'NU',
-          monthlySalesGoal: data.monthlySalesGoal,
-          monthlyVideoGoal: data.monthlyVideoGoal,
-          avatarUrl: data.avatarUrl
-        });
-      });
-      setTeamMembers(members);
-    });
+    localStorage.setItem('teamMembers', JSON.stringify(teamMembers));
+  }, [teamMembers]);
 
-    return () => unsubscribe();
-  }, []);
-
-  const updateMember = async (id: string, data: Partial<Omit<TeamMember, 'id'>>) => {
-    try {
-      await updateDoc(doc(db, 'users', id), {
-         ...data
-      });
-    } catch (e) {
-       console.error("Erro update member", e);
-    }
+  const addMember = (member: Omit<TeamMember, 'id' | 'lastLogin' | 'initials'>) => {
+    const initials = member.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'NU';
+    const newMember: TeamMember = {
+      ...member,
+      id: Date.now().toString(),
+      lastLogin: 'Nunca',
+      initials
+    };
+    setTeamMembers(prev => [...prev, newMember]);
   };
 
-  const deleteMember = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, 'users', id));
-    } catch(e) {
-       console.error("Erro delete member", e);
-    }
+  const updateMember = (id: string, data: Partial<Omit<TeamMember, 'id'>>) => {
+    setTeamMembers(prev => prev.map(m => {
+      if (m.id === id) {
+        const updated = { ...m, ...data };
+        if (data.name) {
+          updated.initials = data.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'NU';
+        }
+        return updated;
+      }
+      return m;
+    }));
   };
 
-  return { teamMembers, updateMember, deleteMember };
+  const deleteMember = (id: string) => {
+    setTeamMembers(prev => prev.filter(m => m.id !== id));
+  };
+
+  return { teamMembers, addMember, updateMember, deleteMember };
 }
