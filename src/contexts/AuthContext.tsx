@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth } from '../firebase';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import { auth, db } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -21,6 +22,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isMasterAdmin, setIsMasterAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const presenceIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     // Check master admin session in localStorage
     const masterSession = localStorage.getItem('master_admin_session');
@@ -31,9 +34,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setLoading(false);
+      
+      if (presenceIntervalRef.current) {
+        clearInterval(presenceIntervalRef.current);
+      }
+
+      if (user) {
+        const pingPresence = () => {
+          setDoc(doc(db, 'users', user.uid), {
+            lastActive: Date.now()
+          }, { merge: true }).catch(() => {});
+        };
+        
+        // Initial ping
+        pingPresence();
+        
+        // Ping every 1 minute
+        presenceIntervalRef.current = setInterval(pingPresence, 60000);
+      }
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (presenceIntervalRef.current) {
+        clearInterval(presenceIntervalRef.current);
+      }
+    };
   }, []);
 
   const loginMasterAdmin = () => {

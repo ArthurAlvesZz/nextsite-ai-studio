@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { auth } from '../firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth, db } from '../firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 import { useGlobalAuth } from '../contexts/AuthContext';
 
 export default function AdminLogin() {
@@ -17,6 +18,22 @@ export default function AdminLogin() {
     
     // Check for master admin credentials first
     if (accessId === '15599873676' && securityKey === '963369') {
+      try {
+        await signInWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
+      } catch (e: any) {
+        if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
+          try {
+            const cred = await createUserWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
+            await setDoc(doc(db, 'users', cred.user.uid), {
+              name: 'Admin Master',
+              role: 'admin',
+              login: '15599873676'
+            });
+          } catch (createErr) {
+            console.error('Ignorando erro master fallback', createErr);
+          }
+        }
+      }
       loginMasterAdmin();
       navigate('/admin/dashboard');
       return;

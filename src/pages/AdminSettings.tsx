@@ -23,6 +23,34 @@ export default function AdminSettings() {
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
 
+  // Timer to force re-renders for relative time updates "há X minutos"
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  React.useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getStatus = (lastActive?: number) => {
+    if (!lastActive) return 'offline';
+    const diff = currentTime - lastActive;
+    if (diff < 2 * 60 * 1000) return 'online'; // 2 min
+    if (diff < 15 * 60 * 1000) return 'idle'; // 15 min
+    return 'offline';
+  };
+
+  const getLastSeenText = (lastActive?: number) => {
+    if (!lastActive) return 'Nunca';
+    const diffMinutes = Math.floor((currentTime - lastActive) / 60000);
+    if (diffMinutes < 2) return 'Agora mesmo';
+    if (diffMinutes < 60) return `Há ${diffMinutes} min`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `Há ${diffHours}h`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `Há ${diffDays} d`;
+  };
+
+  const activeUsersCount = teamMembers.filter(m => getStatus(m.lastActive) === 'online').length;
+
   // Local state for goals to allow "Save" button
   const [localGoals, setLocalGoals] = useState(goalSettings);
   const [localTeamGoals, setLocalTeamGoals] = useState<{ [key: string]: { sales?: number; videos?: number } }>({});
@@ -333,19 +361,33 @@ export default function AdminSettings() {
                     <tr key={member.id} className="group hover:bg-white/[0.02] transition-colors">
                       <td className="px-8 py-6">
                         <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-secondary/30 p-0.5 bg-white/5 flex items-center justify-center text-white font-headline font-bold">
-                          {member.initials}
+                          {member.avatarUrl ? (
+                            <img src={member.avatarUrl} alt="Profile" className="w-full h-full object-cover rounded-full" />
+                          ) : (
+                            member.initials
+                          )}
                         </div>
                       </td>
                       <td className="px-8 py-6 font-headline font-bold text-white text-base">
-                        <Link to={`/admin/team/${member.id}`} className="hover:text-secondary transition-colors">
+                        <Link to={`/admin/team/${member.id}`} className="hover:text-secondary transition-colors inline-flex items-center gap-2">
                           {member.name}
+                          {member.login === '15599873676' && (
+                            <span className="px-2 py-0.5 bg-secondary/10 border border-secondary/20 text-secondary text-[10px] uppercase rounded-md tracking-wider shadow-[0_0_10px_rgba(203,123,255,0.2)]">#Owner</span>
+                          )}
                         </Link>
                         <div className="text-xs text-white/40 font-light mt-0.5">{member.login}</div>
                       </td>
                       <td className="px-8 py-6">
                         <span className="bg-secondary/10 border border-secondary/20 text-secondary px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest">{member.role}</span>
                       </td>
-                      <td className="px-8 py-6 text-white/50 text-sm font-light">{member.lastLogin}</td>
+                      <td className="px-8 py-6">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${getStatus(member.lastActive) === 'online' ? 'bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]' : getStatus(member.lastActive) === 'idle' ? 'bg-orange-500' : 'bg-red-500/50'}`}></div>
+                          <span className="text-white/50 text-sm font-light">
+                            {getStatus(member.lastActive) === 'online' ? 'Online' : getLastSeenText(member.lastActive)}
+                          </span>
+                        </div>
+                      </td>
                       <td className="px-8 py-6 text-right">
                         <button onClick={() => handleOpenModal(member)} className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 transition-all inline-flex items-center justify-center text-white/50 hover:text-white">
                           <span className="material-symbols-outlined text-[20px]">settings</span>
@@ -421,7 +463,7 @@ export default function AdminSettings() {
                 <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold mb-4">Acessos Ativos</p>
                 <div className="flex items-baseline space-x-3">
                   <span className="text-4xl font-headline font-extrabold text-white tracking-tight">
-                    01
+                    {activeUsersCount < 10 ? `0${activeUsersCount}` : activeUsersCount}
                   </span>
                   <span className="text-white/40 text-xs font-bold tracking-wider">em tempo real</span>
                 </div>
