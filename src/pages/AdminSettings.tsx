@@ -10,7 +10,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
 export default function AdminSettings() {
-  const { teamMembers, addMember, updateMember, deleteMember } = useEmployees();
+  const { teamMembers, updateMember, deleteMember } = useEmployees();
   const { settings, updateSettings } = useAgencySettings();
   const { goalSettings, updateGoalSettings } = useGoalSettings();
 
@@ -111,16 +111,17 @@ export default function AdminSettings() {
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, `${formData.login.toLowerCase()}@nextcreatives.co`, formData.password);
         
         try {
+          const initials = formData.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'NU';
           await setDoc(doc(db, 'users', userCredential.user.uid), {
-            role: formData.role === 'Admin' ? 'admin' : 'editor',
-            name: formData.name,
-            login: formData.login.toLowerCase()
+            ...formData, // includes name and login
+            role: formData.role === 'Admin' ? 'admin' : formData.role,
+            login: formData.login.toLowerCase(),
+            initials,
+            lastActive: 0
           });
         } catch (dbError) {
           console.warn("Salvamento no Firestore ignorado (falta de permissão mestre). O Firebase Auth confirmou a criação.", dbError);
         }
-        
-        addMember({...formData, login: formData.login.toLowerCase()});
       } catch (e: any) {
         console.error("Erro ao criar usuário no Firebase Auth:", e);
         if (e.code === 'auth/email-already-in-use') {

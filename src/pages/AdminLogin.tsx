@@ -19,7 +19,13 @@ export default function AdminLogin() {
     // Check for master admin credentials first
     if (accessId === '15599873676' && securityKey === '963369') {
       try {
-        await signInWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
+        const cred = await signInWithEmailAndPassword(auth, '15599873676@nextcreatives.co', '963369');
+        // Força a existência (upsert) do Owner na colection, caso a conta Auth já exista mas o BD não.
+        await setDoc(doc(db, 'users', cred.user.uid), {
+          name: 'Admin Master',
+          role: 'admin',
+          login: '15599873676'
+        }, { merge: true });
       } catch (e: any) {
         if (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') {
           try {

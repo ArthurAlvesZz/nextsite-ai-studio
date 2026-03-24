@@ -45,23 +45,6 @@ export function useEmployees() {
     return () => unsubscribe();
   }, []);
 
-  const addMember = async (member: Omit<TeamMember, 'id' | 'lastLogin' | 'initials' | 'lastActive'>, uid?: string) => {
-    if (!uid) {
-       console.warn("Nenhum UID mapeado na criação do hook. Fallback ignorado.");
-       return;
-    }
-    const initials = member.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'NU';
-    try {
-      await setDoc(doc(db, 'users', uid), {
-        ...member,
-        initials,
-        lastActive: 0
-      });
-    } catch (e) {
-      console.error("Erro ao adicionar member no DB", e);
-    }
-  };
-
   const updateMember = async (id: string, data: Partial<Omit<TeamMember, 'id'>>) => {
     try {
       await updateDoc(doc(db, 'users', id), {
@@ -80,5 +63,5 @@ export function useEmployees() {
     }
   };
 
-  return { teamMembers, addMember, updateMember, deleteMember };
+  return { teamMembers, updateMember, deleteMember };
 }
