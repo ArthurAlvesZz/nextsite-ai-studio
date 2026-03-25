@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
+import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface VideoDemand {
   id: string;
@@ -21,114 +24,67 @@ export interface VideoDemand {
   revisionCount?: number;
 }
 
-const STORAGE_KEY = 'next_creatives_demands';
-
-const DEFAULT_DEMANDS: VideoDemand[] = [
-  { 
-    id: '1', 
-    client: 'Expert Digital', 
-    clientId: '5',
-    saleId: '#8492',
-    title: 'Anúncio Lançamento Março', 
-    deadline: '2024-03-25', 
-    priority: 'Alta', 
-    status: 'Em Produção',
-    videoCount: 5,
-    niche: 'Infoprodutos',
-    type: 'Anúncio VSL',
-    description: 'Vídeos curtos para tráfego pago focados em conversão direta.',
-    plan: 'Scale',
-    createdAt: new Date().toISOString()
-  },
-  { 
-    id: '2', 
-    client: 'Tech Elite', 
-    clientId: '3',
-    saleId: '#8491',
-    title: 'Review Teclado Mecânico', 
-    deadline: '2024-03-28', 
-    priority: 'Média', 
-    status: 'Aberto',
-    videoCount: 1,
-    niche: 'Tecnologia',
-    type: 'Review/Unboxing',
-    description: 'Review detalhado do novo teclado mecânico RGB.',
-    plan: 'Growth',
-    createdAt: new Date().toISOString()
-  },
-  { 
-    id: '3', 
-    client: 'Fitness Pro', 
-    clientId: '6',
-    saleId: '#8489',
-    title: 'Série Treino em Casa', 
-    deadline: '2024-03-30', 
-    priority: 'Alta', 
-    status: 'Revisão',
-    videoCount: 12,
-    niche: 'Fitness',
-    type: 'Série de Aulas',
-    description: '12 vídeos de treinos rápidos para iniciantes.',
-    plan: 'Scale',
-    createdAt: new Date().toISOString()
-  },
-  { 
-    id: '4', 
-    client: 'Luxury Brand', 
-    clientId: '4',
-    saleId: '#8489',
-    title: 'Fashion Film Outono', 
-    deadline: '2024-04-05', 
-    priority: 'Baixa', 
-    status: 'Finalizado',
-    videoCount: 1,
-    niche: 'Luxo',
-    type: 'Cinematográfico',
-    description: 'Vídeo conceito para a nova coleção de outono.',
-    plan: 'Starter',
-    createdAt: new Date().toISOString(),
-    finishedAt: new Date().toISOString(),
-    revisionCount: 0
-  }
-];
-
 export function useDemands() {
-  const [demands, setDemands] = useState<VideoDemand[]>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : DEFAULT_DEMANDS;
-  });
+  const [demands, setDemands] = useState<VideoDemand[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(demands));
-  }, [demands]);
+    const q = query(collection(db, 'demands'), orderBy('createdAt', 'desc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const demandsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as VideoDemand[];
+      setDemands(demandsData);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'demands');
+      setLoading(false);
+    });
 
-  const addDemand = (demand: Omit<VideoDemand, 'id' | 'createdAt'>) => {
-    const newDemand: VideoDemand = {
-      ...demand,
-      id: Math.random().toString(36).substr(2, 9),
-      createdAt: new Date().toISOString()
-    };
-    setDemands(prev => [newDemand, ...prev]);
-    return newDemand;
+    return () => unsubscribe();
+  }, []);
+
+  const addDemand = async (demand: Omit<VideoDemand, 'id' | 'createdAt'>) => {
+    try {
+      const newDemandData = {
+        ...demand,
+        createdAt: new Date().toISOString()
+      };
+      const docRef = await addDoc(collection(db, 'demands'), newDemandData);
+      return { id: docRef.id, ...newDemandData };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'demands');
+      throw error;
+    }
   };
 
-  const updateDemand = (id: string, updates: Partial<VideoDemand>) => {
-    setDemands(prev => prev.map(d => {
-      if (d.id === id) {
-        const updatedDemand = { ...d, ...updates };
-        // If status changed to Finalizado and it wasn't before, set finishedAt
-        if (updates.status === 'Finalizado' && d.status !== 'Finalizado') {
-          updatedDemand.finishedAt = new Date().toISOString();
-        }
-        return updatedDemand;
+  const updateDemand = async (id: string, updates: Partial<VideoDemand>) => {
+    try {
+      const demandRef = doc(db, 'demands', id);
+      const currentDemand = demands.find(d => d.id === id);
+      
+      const updatedData = { ...updates };
+      if (updates.status === 'Finalizado' && currentDemand?.status !== 'Finalizado') {
+        updatedData.finishedAt = new Date().toISOString();
       }
-      return d;
-    }));
+      
+      await updateDoc(demandRef, updatedData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `demands/${id}`);
+      throw error;
+    }
   };
 
-  const deleteDemand = (id: string) => {
-    setDemands(prev => prev.filter(d => d.id !== id));
+  const deleteDemand = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'demands', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `demands/${id}`);
+      throw error;
+    }
   };
 
-  return { demands, addDemand, updateDemand, deleteDemand };
+  return { demands, addDemand, updateDemand, deleteDemand, loading };
 }

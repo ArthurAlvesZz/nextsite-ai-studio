@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { collection, onSnapshot, addDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
+import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface Sale {
   id: string;
@@ -16,40 +19,54 @@ export interface Sale {
 }
 
 export function useSales() {
-  const [sales, setSales] = useState<Sale[]>(() => {
-    const saved = localStorage.getItem('sales_history');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: '#8492', date: '22 Mar, 2024', clientId: '1', clientName: 'Tech Solutions', sellerId: '1', sellerName: 'Carlos Mendes', plan: 'Enterprise', value: 15000, status: 'Confirmado', hasDemand: true },
-      { id: '#8491', date: '21 Mar, 2024', clientId: '2', clientName: 'Global Media', sellerId: '2', sellerName: 'Ana Souza', plan: 'Pro', value: 8000, status: 'Confirmado', hasDemand: true },
-      { id: '#8490', date: '21 Mar, 2024', clientId: '3', clientName: 'Inova Corp', sellerId: '1', sellerName: 'Carlos Mendes', plan: 'Enterprise', value: 12000, status: 'Pendente', hasDemand: false },
-      { id: '#8489', date: '20 Mar, 2024', clientId: '4', clientName: 'Studio X', sellerId: '3', sellerName: 'Ricardo Lima', plan: 'Pro', value: 7000, status: 'Confirmado', hasDemand: true },
-      { id: '#8488', date: '20 Mar, 2024', clientId: '5', clientName: 'Digital Flow', sellerId: '2', sellerName: 'Ana Souza', plan: 'Starter', value: 3500, status: 'Cancelado', hasDemand: false },
-    ];
-  });
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    localStorage.setItem('sales_history', JSON.stringify(sales));
-  }, [sales]);
+    const q = query(collection(db, 'sales'), orderBy('createdAt', 'desc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const salesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Sale[];
+      setSales(salesData);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'sales');
+      setLoading(false);
+    });
 
-  const addSale = (sale: Omit<Sale, 'id' | 'date' | 'status' | 'hasDemand' | 'createdAt'>) => {
-    const newSale: Sale = {
-      ...sale,
-      id: `#${Math.floor(1000 + Math.random() * 9000)}`,
-      date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
-      createdAt: new Date().toISOString(),
-      status: 'Confirmado',
-      hasDemand: false
-    };
-    setSales(prev => [newSale, ...prev]);
-    return newSale;
+    return () => unsubscribe();
+  }, []);
+
+  const addSale = async (sale: Omit<Sale, 'id' | 'date' | 'status' | 'hasDemand' | 'createdAt'>) => {
+    try {
+      const newSaleData = {
+        ...sale,
+        date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
+        createdAt: new Date().toISOString(),
+        status: 'Confirmado',
+        hasDemand: false
+      };
+      const docRef = await addDoc(collection(db, 'sales'), newSaleData);
+      return { id: docRef.id, ...newSaleData };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'sales');
+      throw error;
+    }
   };
 
-  const updateSale = (id: string, data: Partial<Sale>) => {
-    setSales(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
+  const updateSale = async (id: string, data: Partial<Sale>) => {
+    try {
+      await updateDoc(doc(db, 'sales', id), data);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `sales/${id}`);
+      throw error;
+    }
   };
 
   const totalRevenue = sales.reduce((acc, sale) => sale.status === 'Confirmado' ? acc + sale.value : acc, 0);
 
-  return { sales, addSale, updateSale, totalRevenue };
+  return { sales, addSale, updateSale, totalRevenue, loading };
 }

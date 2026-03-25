@@ -34,325 +34,190 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API Route: Cron Job for Automated Lead Harvesting
-  app.get("/api/cron/buscar-leads", async (req, res) => {
+  // API Route: Buscar Leads (New Architecture)
+  app.post("/api/leads/search", async (req, res) => {
     try {
-      // Basic security check for Vercel Cron
-      const authHeader = req.headers.authorization;
-      if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-        return res.status(401).json({ error: 'Unauthorized' });
+      const { nicho, uid } = req.body;
+      
+      if (!nicho || !uid) {
+        return res.status(400).json({ error: 'Nicho e UID são obrigatórios.' });
       }
 
-      if (!db) {
-        return res.status(500).json({ error: 'Firestore not initialized on server' });
+      const apiKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY?.trim();
+      const cx = process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID?.trim();
+
+      if (!apiKey || !cx) {
+        return res.status(500).json({ error: 'Configuração do Google Custom Search ausente.' });
       }
 
-      const apiKey = process.env.SERPAPI_KEY?.trim();
-      if (!apiKey) {
-        return res.status(500).json({ error: 'SERPAPI_KEY not configured' });
+      // Passo 1 - Acionamento por nicho
+      const queryStr = `"${nicho}" "contato" OR "whatsapp" -blog -jusbrasil -reclameaqui`;
+      
+      // Passo 2 - Varredura com proteção
+      const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(queryStr)}&num=10`;
+      
+      const searchRes = await fetch(searchUrl);
+      if (!searchRes.ok) {
+        const errData = await searchRes.json().catch(() => ({}));
+        console.error(`Google Search API Error (Status ${searchRes.status}):`, JSON.stringify(errData, null, 2));
+        return res.status(searchRes.status).json({ 
+          error: `Erro na Google Custom Search API (Status ${searchRes.status})`,
+          details: errData.error?.message || 'Erro desconhecido',
+          fullError: errData
+        });
       }
 
-      // 1. Fetch all Dorks
-      const dorksSnapshot = await getDocs(collection(db, 'dorks'));
-      let dorks = dorksSnapshot.docs.map(doc => doc.data().termo);
+      const searchData = await searchRes.json();
+      const items = searchData.items || [];
+      
+      if (items.length === 0) {
+        return res.json({ message: 'Nenhum resultado encontrado.', leads: [] });
+      }
 
-      // Array de Super Dorks (Focados 100% em Lojas Virtuais Reais e Grandes no Brasil)
-      const dorksMatadores = [
-        // 1. Shopify Lojas BR: Foca na URL de coleções e exclui lixo
-        'inurl:"/collections/todos" "adicionar ao carrinho" "CNPJ" -blog -tutorial -como -remove -forum',
-        
-        // 2. Nuvemshop / Lojas Integradas: Foca em produtos e políticas de troca
-        'inurl:"/produto/" "comprar agora" "Trocas e devoluções" "CNPJ" -blog -curso -reclameaqui',
-        
-        // 3. E-commerces focados em Moda (Ticket Médio Alto)
-        'inurl:"/categoria/" "moda feminina" "frete grátis" "CNPJ" -blog -pinterest -mercadolivre',
-        
-        // 4. Lojas de Dropshipping/Checkout Alta Conversão (Yampi/CartPanda)
-        '"termos de serviço" "prazo de entrega" "código de rastreio" "CNPJ" -blog -youtube -curso'
+      // Checar no Firestore se já existe em leadsColhidos
+      const leadsSnapshot = await getDocs(collection(db, 'leadsColhidos'));
+      const savedUrls = leadsSnapshot.docs.map(doc => doc.data().url);
+
+      const urlsParaProcessar = items
+        .map((item: any) => item.link)
+        .filter((link: string) => !savedUrls.includes(link));
+
+      if (urlsParaProcessar.length === 0) {
+        return res.json({ message: 'Todos os leads encontrados já foram colhidos.', leads: [] });
+      }
+
+      // Import p-limit dynamically because it's ESM
+      const pLimit = (await import('p-limit')).default;
+      const limitConcurrency = pLimit(3);
+      const cheerio = await import('cheerio');
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
+
+      const userAgents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
       ];
 
-      if (dorks.length === 0) {
-        console.log('Nenhum dork encontrado no banco. Usando Super Dorks padrão.');
-        dorks = dorksMatadores;
-      }
-
-      // 2. Fetch all saved URLs
-      const leadsSnapshot = await getDocs(collection(db, 'leads'));
-      const savedUrls = leadsSnapshot.docs.map(doc => doc.data().site);
-
-      let totalNewLeads = 0;
-
-      // 3. Process each Dork
-      for (const termoBusca of dorks) {
-        console.log(`Cron: Buscando leads para dork: ${termoBusca}`);
-        let todosResultados: any[] = [];
-
-        // Fetch 2 pages to avoid timing out the cron job
-        for (let start = 0; start <= 20; start += 20) {
-          const params = new URLSearchParams({
-            engine: 'google',
-            q: termoBusca,
-            api_key: apiKey,
-            start: String(start),
-            num: '20',
-            gl: 'br',
-            hl: 'pt',
-            google_domain: 'google.com.br'
-          });
-
-          const serpApiUrl = `https://serpapi.com/search.json?${params.toString()}`;
-          const serpRes = await fetch(serpApiUrl);
-          
-          if (!serpRes.ok) continue;
-
-          const serpData = await serpRes.json();
-          if (serpData.organic_results) {
-            todosResultados.push(...serpData.organic_results);
-          }
-        }
-
-        const skipDomains = ['facebook.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'twitter.com', 'yelp.com', 'tripadvisor.com', 'tiktok.com', 'pinterest.com'];
-        
-        const linksIneditos = todosResultados.filter(result => {
-          if (!result.link) return false;
-          if (savedUrls.includes(result.link)) return false;
-          if (skipDomains.some(domain => result.link.includes(domain))) return false;
-          return true;
-        });
-
-        const linksUnicos = Array.from(new Map(linksIneditos.map(item => [item.link, item])).values());
-        
-        for (const result of linksUnicos) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000); // Shorter timeout for cron
-
-            const siteRes = await fetch(result.link, { 
-                signal: controller.signal,
-                headers: { 
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                }
-            });
-            clearTimeout(timeoutId);
-
-            if (!siteRes.ok) continue;
-
-            const html = await siteRes.text();
-
-            const temPixelMeta = html.includes("fbq('init'") || html.includes("connect.facebook.net") || html.includes("fbevents.js");
-            const temPixelGoogle = html.includes("gtag(") || html.includes("googletagmanager.com/gtm.js") || html.includes("google-analytics.com/analytics.js");
-
-            if (temPixelMeta || temPixelGoogle) {
-              const instaMatch = html.match(/https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9_.-]+/i);
-              const instagram = instaMatch ? instaMatch[0] : null;
-
-              const whatsMatch = html.match(/https?:\/\/(wa\.me|api\.whatsapp\.com\/send\?phone=|web\.whatsapp\.com\/send\?phone=)\/?([0-9]+)/i);
-              const whatsapp = whatsMatch ? whatsMatch[0] : null;
-
-              const newLead = {
-                nome: result.title,
-                site: result.link,
-                plataformas: temPixelMeta && temPixelGoogle ? 'Meta & Google' : (temPixelMeta ? 'Meta Ads' : 'Google Ads'),
-                contatos: {
-                  instagram: instagram || 'Não encontrado',
-                  whatsapp: whatsapp || 'Não encontrado'
-                },
-                termoBusca,
-                createdAt: new Date().toISOString(),
-                createdBy: 'cron-job'
-              };
-
-              await addDoc(collection(db, 'leads'), newLead);
-              savedUrls.push(result.link); // Add to local cache to prevent duplicates in same run
-              totalNewLeads++;
-            }
-          } catch (e) {
-            // Ignore errors for individual sites during cron
-          }
-        }
-      }
-
-      res.json({ message: `Cron job completed. Harvested ${totalNewLeads} new leads.` });
-    } catch (error) {
-      console.error("Cron job error:", error);
-      res.status(500).json({ error: 'Internal server error during cron job' });
-    }
-  });
-
-  // API Route: Testar Conexão SerpApi
-  app.get("/api/testar-serpapi", async (req, res) => {
-    const apiKey = process.env.SERPAPI_KEY?.trim();
-    if (!apiKey) {
-      return res.status(500).json({ sucesso: false, error: 'SERPAPI_KEY não configurada.' });
-    }
-
-    try {
-      const response = await fetch(`https://serpapi.com/search.json?engine=google&q=test&api_key=${apiKey}&num=1`);
-      if (response.ok) {
-        res.json({ sucesso: true, message: 'Conexão com SerpApi estabelecida com sucesso!' });
-      } else {
-        const data = await response.json().catch(() => ({}));
-        res.status(response.status).json({ sucesso: false, error: data.error || `Erro ${response.status} na SerpApi` });
-      }
-    } catch (error) {
-      res.status(500).json({ sucesso: false, error: 'Erro ao conectar com SerpApi.' });
-    }
-  });
-
-  // API Route: Buscar Leads
-  app.post("/api/buscar-leads", async (req, res) => {
-    try {
-      const { termoBusca, savedUrls = [], gl = 'br', hl = 'pt', google_domain = 'google.com.br' } = req.body;
-      const apiKey = process.env.SERPAPI_KEY?.trim();
-
-      if (!apiKey) {
-        return res.status(500).json({ 
-          sucesso: false, 
-          error: 'Configuração incompleta: SERPAPI_KEY não encontrada no servidor. Verifique os Segredos (Secrets) no AI Studio.' 
-        });
-      }
-
-      if (!termoBusca) {
-        return res.status(400).json({ sucesso: false, error: 'Termo de busca não fornecido.' });
-      }
-
-      console.log(`Buscando leads via SerpApi para: ${termoBusca} (gl: ${gl}, hl: ${hl})`);
-
-      let todosResultados: any[] = [];
-
-      // Loop para pegar as 3 primeiras páginas do Google (60 resultados)
-      for (let start = 0; start <= 40; start += 20) {
-        const params = new URLSearchParams({
-          engine: 'google',
-          q: termoBusca,
-          api_key: apiKey,
-          start: String(start),
-          num: '20',
-          gl: String(gl),
-          hl: String(hl),
-          google_domain: String(google_domain)
-        });
-
-        const serpApiUrl = `https://serpapi.com/search.json?${params.toString()}`;
-        const serpRes = await fetch(serpApiUrl);
-        
-        if (!serpRes.ok) {
-          console.error(`Erro na SerpApi na página start=${start}: Status ${serpRes.status}`);
-          if (serpRes.status === 401 && start === 0) {
-            return res.status(401).json({
-              sucesso: false,
-              error: 'Chave de API da SerpApi inválida. Verifique os Segredos.'
-            });
-          }
-          continue; // Se falhar uma página, tenta a próxima
-        }
-
-        const serpData = await serpRes.json();
-        if (serpData.organic_results) {
-          todosResultados.push(...serpData.organic_results);
-        }
-      }
-
-      console.log(`Total de resultados brutos da SerpApi: ${todosResultados.length}`);
-
-      // Filtro Anti-Duplicidade e Domínios Comuns
-      const skipDomains = ['facebook.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'twitter.com', 'yelp.com', 'tripadvisor.com', 'tiktok.com', 'pinterest.com'];
-      
-      const linksIneditos = todosResultados.filter(result => {
-        if (!result.link) return false;
-        
-        // Verifica se já temos no banco (passado pelo frontend)
-        if (savedUrls.includes(result.link)) {
-          return false;
-        }
-
-        // Verifica se é um domínio ignorado
-        if (skipDomains.some(domain => result.link.includes(domain))) {
-          return false;
-        }
-
-        return true;
-      });
-
-      // Remove duplicatas dentro da própria busca atual
-      const linksUnicos = Array.from(new Map(linksIneditos.map(item => [item.link, item])).values());
-
-      console.log(`Links inéditos para varredura: ${linksUnicos.length}`);
-      
-      const leadsQuentes = [];
-
-      // 2. O Radar de Pixel (apenas nos inéditos)
-      for (const result of linksUnicos) {
-        console.log(`Verificando site inédito: ${result.link}`);
-
+      const processUrl = async (url: string) => {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 5000);
+          
+          const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
 
-          const siteRes = await fetch(result.link, { 
-              signal: controller.signal,
-              headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
-              }
+          const siteRes = await fetch(url, {
+            signal: controller.signal,
+            headers: { 'User-Agent': randomUA }
           });
           clearTimeout(timeoutId);
 
-          if (!siteRes.ok) {
-            console.log(`Falha ao carregar site: ${result.link} (Status: ${siteRes.status})`);
-            continue;
-          }
+          if (!siteRes.ok) return null;
 
           const html = await siteRes.text();
+          const $ = cheerio.load(html);
 
-          // 1. Verifica os Pixels
-          const temPixelMeta = 
-            html.includes("fbq('init'") || 
-            html.includes("connect.facebook.net") || 
-            html.includes("fbevents.js");
-            
-          const temPixelGoogle = 
-            html.includes("gtag(") || 
-            html.includes("googletagmanager.com/gtm.js") || 
-            html.includes("google-analytics.com/analytics.js");
+          // Passo 3 - Radar de tecnologias
+          const temMetaPixel = html.includes("fbq(") || html.includes("fbevents.js");
+          const temGoogleAds = html.includes("gtag(") || html.includes("googletagmanager.com/gtm.js");
+          
+          const whatsMatch = html.match(/(?:https?:\/\/)?(?:wa\.me|api\.whatsapp\.com\/send\?phone=|web\.whatsapp\.com\/send\?phone=)\/?([0-9]+)/i);
+          const whatsapp = whatsMatch ? whatsMatch[1] : null;
 
-          // Só prossegue com a extração se for um Lead Quente (tem pixel)
-          if (temPixelMeta || temPixelGoogle) {
-            console.log(`Lead quente encontrado: ${result.title}`);
-            
-            // 2. Regex para pescar o Instagram
-            const instaMatch = html.match(/https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9_.-]+/i);
-            const instagram = instaMatch ? instaMatch[0] : null;
+          const instaMatch = html.match(/https?:\/\/(www\.)?instagram\.com\/([a-zA-Z0-9_.-]+)/i);
+          const instagram = instaMatch ? instaMatch[0] : null;
 
-            // 3. Regex para pescar o WhatsApp
-            const whatsMatch = html.match(/https?:\/\/(wa\.me|api\.whatsapp\.com\/send\?phone=|web\.whatsapp\.com\/send\?phone=)\/?([0-9]+)/i);
-            const whatsapp = whatsMatch ? whatsMatch[0] : null;
+          const gruposWhatsApp: string[] = [];
+          $('a[href*="chat.whatsapp.com"]').each((_, el) => {
+            const href = $(el).attr('href');
+            if (href) gruposWhatsApp.push(href);
+          });
 
-            leadsQuentes.push({
-              nome: result.title,
-              site: result.link,
-              plataformas: temPixelMeta && temPixelGoogle ? 'Meta & Google' : (temPixelMeta ? 'Meta Ads' : 'Google Ads'),
-              contatos: {
-                instagram: instagram || 'Não encontrado',
-                whatsapp: whatsapp || 'Não encontrado'
+          const cnpjMatch = html.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
+          const cnpj = cnpjMatch ? cnpjMatch[0] : null;
+
+          const dominio = new URL(url).hostname.replace('www.', '');
+
+          // Passo 4 - Enriquecimento de dados
+          let razaoSocial = null;
+          let capitalSocial = null;
+          if (cnpj) {
+            try {
+              const cnpjClean = cnpj.replace(/\D/g, '');
+              const controllerCnpj = new AbortController();
+              const timeoutCnpj = setTimeout(() => controllerCnpj.abort(), 5000);
+              const cnpjRes = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjClean}`, { signal: controllerCnpj.signal });
+              clearTimeout(timeoutCnpj);
+              if (cnpjRes.ok) {
+                const cnpjData = await cnpjRes.json();
+                razaoSocial = cnpjData.razao_social || null;
+                capitalSocial = cnpjData.capital_social || null;
               }
-            });
-          } else {
-            console.log(`Nenhum pixel detectado em: ${result.link}`);
+            } catch (e) { console.error("BrasilAPI Error", e); }
           }
-        } catch (e) {
-           console.log(`Erro ao processar site ${result.link}:`, e instanceof Error ? e.message : 'Timeout/Network Error');
-           continue; 
-        }
-      }
 
-      console.log(`Varredura finalizada. ${leadsQuentes.length} novos leads quentes encontrados.`);
-      res.json({ sucesso: true, leads: leadsQuentes });
+          let logo = null;
+          try {
+            const controllerLogo = new AbortController();
+            const timeoutLogo = setTimeout(() => controllerLogo.abort(), 5000);
+            const logoRes = await fetch(`https://logo.clearbit.com/${dominio}`, { signal: controllerLogo.signal });
+            clearTimeout(timeoutLogo);
+            if (logoRes.ok) {
+              logo = `https://logo.clearbit.com/${dominio}`;
+            }
+          } catch (e) { console.error("Clearbit Error", e); }
+
+          let abordagemWhatsApp = null;
+          if (ai) {
+            try {
+              const prompt = `Gere uma mensagem curta e persuasiva de WhatsApp (fria) para oferecer vídeos de conversão feitos por IA para uma empresa do nicho de ${nicho}. O site deles é ${url}. Seja direto e profissional.`;
+              const aiRes = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: prompt
+              });
+              abordagemWhatsApp = aiRes.text || null;
+            } catch (e) { console.error("Gemini Error", e); }
+          }
+
+          // Passo 5 - Salvamento no Firestore
+          const leadData = {
+            url,
+            dominio,
+            nicho,
+            temMetaPixel,
+            temGoogleAds,
+            whatsapp,
+            instagram,
+            gruposWhatsApp,
+            cnpj,
+            razaoSocial,
+            capitalSocial,
+            logo,
+            abordagemWhatsApp,
+            createdAt: new Date().toISOString(),
+            createdBy: uid,
+            updatedBy: uid
+          };
+
+          await addDoc(collection(db, 'leadsColhidos'), leadData);
+          return leadData;
+
+        } catch (error) {
+          console.error(`Erro ao processar ${url}:`, error);
+          return null;
+        }
+      };
+
+      const processPromises = urlsParaProcessar.map((url: string) => limitConcurrency(() => processUrl(url)));
+      const results = await Promise.all(processPromises);
+      
+      const leadsSalvos = results.filter(r => r !== null);
+
+      res.json({ sucesso: true, message: `${leadsSalvos.length} leads colhidos e salvos.`, leads: leadsSalvos });
 
     } catch (error) {
-      console.error('Erro no rastreio:', error);
-      res.status(500).json({ sucesso: false, error: 'Falha na varredura.' });
+      console.error('Erro no motor de leads:', error);
+      res.status(500).json({ sucesso: false, error: 'Falha interna no motor de leads.' });
     }
   });
 

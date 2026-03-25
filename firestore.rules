@@ -13,9 +13,19 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() && (
-        (request.auth.token.email == "arthurfgalves@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "arthurfgalves@gmail.com") ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
+    }
+
+    function isEditor() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor'
+      );
+    }
+
+    function isAdminOrEditor() {
+      return isAdmin() || isEditor();
     }
 
     function isOwner(userId) {
@@ -40,14 +50,46 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     
-    match /leads/{leadId} {
-      // Only admins can read and write leads
-      allow read, write: if isAdmin();
+    match /leadsColhidos/{leadId} {
+      // Only admins and editors can read and write leads
+      allow read, write: if isAdminOrEditor();
     }
     
     match /dorks/{dorkId} {
       // Only admins can read and write dorks
       allow read, write: if isAdmin();
+    }
+
+    match /clients/{clientId} {
+      // Admins and editors can read and write clients
+      allow read, write: if isAdminOrEditor();
+    }
+
+    match /sales/{saleId} {
+      // Admins and editors can read and write sales
+      allow read, write: if isAdminOrEditor();
+    }
+
+    match /demands/{demandId} {
+      // Admins and editors can read and write demands
+      allow read, write: if isAdminOrEditor();
+    }
+
+    match /employees/{employeeId} {
+      // Anyone can read (to show in lists), but only admins can write
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /goals/{goalId} {
+      // Admins and editors can read goals, only admins can update
+      allow read: if isAdminOrEditor();
+      allow write: if isAdmin();
+    }
+    
+    match /presence/{sessionId} {
+      // Anyone can read and write presence to show online users
+      allow read, write: if true;
     }
   }
 }

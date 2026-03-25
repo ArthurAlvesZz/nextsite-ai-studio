@@ -39,32 +39,39 @@
     },
     "User": {
       "title": "User",
-      "description": "Admin users",
+      "description": "Admin and editor users",
       "type": "object",
       "properties": {
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["admin"] },
+        "role": { "type": "string", "enum": ["admin", "editor"] },
+        "displayName": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       }
     },
-    "Lead": {
-      "title": "Lead",
+    "LeadColhido": {
+      "title": "Lead Colhido",
       "description": "A harvested lead from the search tool",
       "type": "object",
       "properties": {
-        "nome": { "type": "string" },
-        "site": { "type": "string" },
-        "plataformas": { "type": "string" },
-        "contatos": {
-          "type": "object",
-          "properties": {
-            "instagram": { "type": "string" },
-            "whatsapp": { "type": "string" }
-          }
+        "url": { "type": "string" },
+        "dominio": { "type": "string" },
+        "nicho": { "type": "string" },
+        "temMetaPixel": { "type": "boolean" },
+        "temGoogleAds": { "type": "boolean" },
+        "whatsapp": { "type": "string" },
+        "instagram": { "type": "string" },
+        "gruposWhatsApp": {
+          "type": "array",
+          "items": { "type": "string" }
         },
-        "termoBusca": { "type": "string" },
+        "cnpj": { "type": "string" },
+        "razaoSocial": { "type": "string" },
+        "capitalSocial": { "type": "number" },
+        "logo": { "type": "string" },
+        "abordagemWhatsApp": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
-        "createdBy": { "type": "string" }
+        "createdBy": { "type": "string" },
+        "updatedBy": { "type": "string" }
       }
     },
     "Dork": {
@@ -75,6 +82,96 @@
         "termo": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Customer of the agency",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "niche": { "type": "string" },
+        "document": { "type": "string" },
+        "instagram": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "billedAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Ativo", "Inativo"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "A recorded sale in the system",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "sellerId": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "plan": { "type": "string" },
+        "value": { "type": "number" },
+        "status": { "type": "string", "enum": ["Confirmado", "Pendente", "Cancelado"] },
+        "pixReceipt": { "type": "string" },
+        "hasDemand": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Demand": {
+      "title": "Demand",
+      "description": "A video production demand",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "client": { "type": "string" },
+        "clientId": { "type": "string" },
+        "plan": { "type": "string" },
+        "niche": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string", "enum": ["Aberto", "Em Produção", "Revisão", "Finalizado"] },
+        "priority": { "type": "string", "enum": ["Baixa", "Média", "Alta"] },
+        "deadline": { "type": "string" },
+        "assignedTo": { "type": "string" },
+        "assignedToName": { "type": "string" },
+        "saleId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Team member of the agency",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["Ativo", "Inativo"] },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "revenue": { "type": "number" },
+            "videos": { "type": "number" },
+            "quality": { "type": "number" },
+            "delivery": { "type": "string" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "GoalSettings": {
+      "title": "Goal Settings",
+      "description": "Global goals for the agency",
+      "type": "object",
+      "properties": {
+        "monthlyRevenue": { "type": "number" },
+        "monthlyVideos": { "type": "number" },
+        "weeklyRevenue": { "type": "number" },
+        "weeklyVideos": { "type": "number" },
+        "dailyRevenue": { "type": "number" },
+        "dailyVideos": { "type": "number" }
+      }
     }
   },
   "firestore": {
@@ -82,13 +179,33 @@
       "schema": "AgencySettings",
       "description": "Singleton document for agency settings (e.g., settings/global)"
     },
+    "goals/{goalId}": {
+      "schema": "GoalSettings",
+      "description": "Singleton document for global goals (e.g., goals/global)"
+    },
     "users/{userId}": {
       "schema": "User",
-      "description": "Admin users of the system"
+      "description": "Admin and editor users of the system"
     },
-    "leads/{leadId}": {
-      "schema": "Lead",
-      "description": "Harvested leads saved by admins"
+    "clients/{clientId}": {
+      "schema": "Client",
+      "description": "Customers of the agency"
+    },
+    "sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Sales records"
+    },
+    "demands/{demandId}": {
+      "schema": "Demand",
+      "description": "Video production demands"
+    },
+    "employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Team members"
+    },
+    "leadsColhidos/{leadId}": {
+      "schema": "LeadColhido",
+      "description": "Harvested leads saved by admins and editors"
     },
     "dorks/{dorkId}": {
       "schema": "Dork",

@@ -34,7 +34,8 @@ export default function AdminTools() {
   const tools = [
     { name: 'Remove WaterMark Sora 2', icon: 'water_drop', color: 'text-secondary', link: '/admin/sora-remover' },
     { name: 'Editor Cloud', icon: 'cloud_done', color: 'text-primary' },
-    { name: 'Buscar Leads', icon: 'search_check', color: 'text-secondary', link: '/admin/leads' },
+    { name: 'Motor de Leads', icon: 'radar', color: 'text-secondary', link: '/admin/leads/search' },
+    { name: 'Leads Salvos', icon: 'person_search', color: 'text-white', link: '/admin/leads' },
     { name: 'Asset Library', icon: 'folder_special', color: 'text-white' },
     { name: 'Color Palettes', icon: 'palette', color: 'text-secondary/70' }
   ];

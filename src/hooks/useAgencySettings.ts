@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface PortfolioCase {
   videoSrc: string;
@@ -86,11 +87,17 @@ export function useAgencySettings() {
       try {
         const docSnap = await getDoc(docRef);
         if (!docSnap.exists() && auth.currentUser) {
-          // Only attempt to write if we are logged in (presumably as admin)
-          await setDoc(docRef, DEFAULT_SETTINGS);
+          // Only attempt to write if we are logged in.
+          // We wrap this in a try-catch specifically for the write operation
+          // so that if a non-admin user triggers this, it doesn't crash the app.
+          try {
+            await setDoc(docRef, DEFAULT_SETTINGS);
+          } catch (writeError) {
+            console.warn("Could not initialize default settings (likely not an admin):", writeError);
+          }
         }
       } catch (e) {
-        console.error("Error checking settings:", e);
+        handleFirestoreError(e, OperationType.GET, 'settings/global');
       }
     };
     
@@ -102,7 +109,7 @@ export function useAgencySettings() {
       }
       setLoading(false);
     }, (error) => {
-      console.error("Error fetching settings:", error);
+      handleFirestoreError(error, OperationType.GET, 'settings/global');
       setLoading(false);
     });
 
@@ -114,7 +121,7 @@ export function useAgencySettings() {
       const docRef = doc(db, 'settings', 'global');
       await setDoc(docRef, { ...settings, ...newSettings }, { merge: true });
     } catch (error) {
-      console.error("Error updating settings:", error);
+      handleFirestoreError(error, OperationType.UPDATE, 'settings/global');
       throw error;
     }
   };

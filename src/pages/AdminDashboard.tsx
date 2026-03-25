@@ -7,6 +7,8 @@ import { useClients } from '../hooks/useClients';
 import { useDemands } from '../hooks/useDemands';
 import { useEmployees } from '../hooks/useEmployees';
 import { useGoalSettings } from '../hooks/useGoalSettings';
+import { usePresence } from '../hooks/usePresence';
+import ErrorBoundary from '../components/ErrorBoundary';
 import { 
   AreaChart, 
   Area, 
@@ -39,6 +41,7 @@ export default function AdminDashboard() {
   const { demands } = useDemands();
   const { teamMembers } = useEmployees();
   const { goalSettings } = useGoalSettings();
+  const { onlineUsers } = usePresence();
   
   // Helper to parse date from sales (format: "22 Mar, 2024")
   const parseSaleDate = (sale: Sale) => {
@@ -256,7 +259,8 @@ export default function AdminDashboard() {
   }, [filteredSales, filteredDemands, rankingType, teamMembers, goalSettings]);
 
   return (
-    <div className="font-body text-on-background min-h-screen flex bg-[#050505] overflow-hidden selection:bg-primary/30">
+    <ErrorBoundary>
+      <div className="font-body text-on-background min-h-screen flex bg-[#050505] overflow-hidden selection:bg-primary/30">
       {/* Background from Home */}
       <div className="fixed inset-0 w-full h-full -z-10 bg-[#050505] overflow-hidden">
         <div className="absolute inset-0 w-full h-full opacity-1 bg-gradient-to-b from-[#020202] to-transparent">
@@ -340,7 +344,7 @@ export default function AdminDashboard() {
           </div>
 
           {/* Metrics Bento Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
             <div className="bg-white/[0.02] border border-white/10 backdrop-blur-xl p-8 rounded-2xl space-y-4 hover:border-white/20 hover:bg-white/[0.04] transition-all group">
               <div className="flex justify-between items-start">
                 <div className="p-2.5 bg-primary/10 rounded-xl border border-primary/20 group-hover:bg-primary/20 transition-colors">
@@ -401,78 +405,100 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Goal Progress Card */}
-            <div className="md:col-span-3 lg:col-span-5 bg-white/[0.02] border border-white/10 backdrop-blur-xl p-8 rounded-2xl hover:border-white/20 hover:bg-white/[0.04] transition-all group">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-secondary/10 rounded-2xl border border-secondary/20">
-                    <span className="material-symbols-outlined text-secondary">target</span>
+            {/* Online Users Card */}
+            <div className="bg-white/[0.02] border border-white/10 backdrop-blur-xl p-8 rounded-2xl space-y-4 hover:border-white/20 hover:bg-white/[0.04] transition-all group relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-500 opacity-50"></div>
+              <div className="flex justify-between items-start relative z-10">
+                <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 group-hover:bg-emerald-500/20 transition-colors relative">
+                  <span className="material-symbols-outlined text-emerald-400">public</span>
+                  <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping"></span>
+                  <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-emerald-400 rounded-full"></span>
+                </div>
+              </div>
+              <div className="relative z-10">
+                <p className="text-white/40 text-[10px] font-bold uppercase tracking-[0.2em] mb-2">Usuários Online</p>
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-3xl font-headline font-extrabold text-white tracking-tight">{onlineUsers}</h3>
+                  <span className="text-emerald-400 text-xs font-bold uppercase tracking-widest animate-pulse">Agora</span>
+                </div>
+              </div>
+              
+              {/* Decorative background glow */}
+              <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-emerald-500/10 blur-3xl rounded-full pointer-events-none"></div>
+            </div>
+          </div>
+
+          {/* Goal Progress Card */}
+          <div className="bg-white/[0.02] border border-white/10 backdrop-blur-xl p-8 rounded-2xl hover:border-white/20 hover:bg-white/[0.04] transition-all group">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-secondary/10 rounded-2xl border border-secondary/20">
+                  <span className="material-symbols-outlined text-secondary">target</span>
+                </div>
+                <div>
+                  <h3 className="text-xl font-headline font-bold text-white tracking-tight">Progresso das Metas</h3>
+                  <p className="text-white/40 text-xs font-light uppercase tracking-widest">Mês de {format(new Date(), 'MMMM', { locale: ptBR })}</p>
+                </div>
+              </div>
+
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Sales Goal */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-end">
+                    <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Meta de Vendas</p>
+                    {(() => {
+                      const currentMonthKey = new Date().toISOString().substring(0, 7);
+                      const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlySalesGoal || 200000;
+                      const progress = Math.min(Math.round((currentMonthStats.revenue / monthGoal) * 100), 100);
+                      return (
+                        <p className="text-sm font-headline font-bold text-white">
+                          {progress}% <span className="text-white/20 font-normal ml-1">/ R$ {monthGoal.toLocaleString('pt-BR')}</span>
+                        </p>
+                      );
+                    })()}
                   </div>
-                  <div>
-                    <h3 className="text-xl font-headline font-bold text-white tracking-tight">Progresso das Metas</h3>
-                    <p className="text-white/40 text-xs font-light uppercase tracking-widest">Mês de {format(new Date(), 'MMMM', { locale: ptBR })}</p>
+                  <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
+                    {(() => {
+                      const currentMonthKey = new Date().toISOString().substring(0, 7);
+                      const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlySalesGoal || 200000;
+                      const progress = Math.min(Math.round((currentMonthStats.revenue / monthGoal) * 100), 100);
+                      return (
+                        <div 
+                          className="bg-secondary h-full shadow-[0_0_15px_rgba(203,123,255,0.4)] transition-all duration-1000" 
+                          style={{ width: `${progress}%` }}
+                        ></div>
+                      );
+                    })()}
                   </div>
                 </div>
 
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Sales Goal */}
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Meta de Vendas</p>
-                      {(() => {
-                        const currentMonthKey = new Date().toISOString().substring(0, 7);
-                        const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlySalesGoal || 200000;
-                        const progress = Math.min(Math.round((currentMonthStats.revenue / monthGoal) * 100), 100);
-                        return (
-                          <p className="text-sm font-headline font-bold text-white">
-                            {progress}% <span className="text-white/20 font-normal ml-1">/ R$ {monthGoal.toLocaleString('pt-BR')}</span>
-                          </p>
-                        );
-                      })()}
-                    </div>
-                    <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
-                      {(() => {
-                        const currentMonthKey = new Date().toISOString().substring(0, 7);
-                        const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlySalesGoal || 200000;
-                        const progress = Math.min(Math.round((currentMonthStats.revenue / monthGoal) * 100), 100);
-                        return (
-                          <div 
-                            className="bg-secondary h-full shadow-[0_0_15px_rgba(203,123,255,0.4)] transition-all duration-1000" 
-                            style={{ width: `${progress}%` }}
-                          ></div>
-                        );
-                      })()}
-                    </div>
+                {/* Video Goal */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-end">
+                    <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Meta de Vídeos</p>
+                    {(() => {
+                      const currentMonthKey = new Date().toISOString().substring(0, 7);
+                      const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlyVideoGoal || 500;
+                      const progress = Math.min(Math.round((currentMonthStats.videos / monthGoal) * 100), 100);
+                      return (
+                        <p className="text-sm font-headline font-bold text-white">
+                          {progress}% <span className="text-white/20 font-normal ml-1">/ {monthGoal.toLocaleString('pt-BR')} vídeos</span>
+                        </p>
+                      );
+                    })()}
                   </div>
-
-                  {/* Video Goal */}
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Meta de Vídeos</p>
-                      {(() => {
-                        const currentMonthKey = new Date().toISOString().substring(0, 7);
-                        const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlyVideoGoal || 500;
-                        const progress = Math.min(Math.round((currentMonthStats.videos / monthGoal) * 100), 100);
-                        return (
-                          <p className="text-sm font-headline font-bold text-white">
-                            {progress}% <span className="text-white/20 font-normal ml-1">/ {monthGoal.toLocaleString('pt-BR')} vídeos</span>
-                          </p>
-                        );
-                      })()}
-                    </div>
-                    <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
-                      {(() => {
-                        const currentMonthKey = new Date().toISOString().substring(0, 7);
-                        const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlyVideoGoal || 500;
-                        const progress = Math.min(Math.round((currentMonthStats.videos / monthGoal) * 100), 100);
-                        return (
-                          <div 
-                            className="bg-primary h-full shadow-[0_0_15px_rgba(151,169,255,0.4)] transition-all duration-1000" 
-                            style={{ width: `${progress}%` }}
-                          ></div>
-                        );
-                      })()}
-                    </div>
+                  <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
+                    {(() => {
+                      const currentMonthKey = new Date().toISOString().substring(0, 7);
+                      const monthGoal = goalSettings.months[currentMonthKey]?.totalMonthlyVideoGoal || 500;
+                      const progress = Math.min(Math.round((currentMonthStats.videos / monthGoal) * 100), 100);
+                      return (
+                        <div 
+                          className="bg-primary h-full shadow-[0_0_15px_rgba(151,169,255,0.4)] transition-all duration-1000" 
+                          style={{ width: `${progress}%` }}
+                        ></div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -599,9 +625,9 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-
         </div>
       </main>
     </div>
+    </ErrorBoundary>
   );
 }

@@ -15,13 +15,23 @@ export default function AdminLogin() {
     
     // Check for master admin credentials first
     if (accessId === '15599873676' && securityKey === '963369') {
-      navigate('/admin/dashboard');
-      return;
+      try {
+        // Try to sign in with the master email
+        await signInWithEmailAndPassword(auth, 'arthurfgalves@gmail.com', securityKey);
+        navigate('/admin/dashboard');
+        return;
+      } catch (e) {
+        console.warn("Master login via email failed, trying fallback...", e);
+        // Fallback: maybe they haven't created the account yet?
+        // In a real app, we'd handle this better. 
+        // For now, we MUST sign in to avoid permission errors.
+      }
     }
 
     // Proceed with Firebase Auth for other users
     try {
-      await signInWithEmailAndPassword(auth, `${accessId}@nextcreatives.co`, securityKey);
+      const email = accessId.includes('@') ? accessId : `${accessId}@nextcreatives.co`;
+      await signInWithEmailAndPassword(auth, email, securityKey);
       navigate('/admin/dashboard');
     } catch (e) {
       console.error("Erro ao logar no Firebase Auth:", e);
@@ -68,7 +78,7 @@ export default function AdminLogin() {
                 <label className="block text-[10px] uppercase tracking-[0.3em] text-secondary/70 mb-2 ml-1 font-headline font-bold">Access ID</label>
                 <div className="relative">
                   <input 
-                    className="w-full bg-transparent border-0 border-b border-white/20 py-3 px-1 text-white focus:ring-0 focus:border-secondary transition-all duration-300 placeholder:text-white/20 font-light tracking-wider" 
+                    className="w-full bg-transparent border-0 border-b border-white/20 py-3 px-1 text-white focus:ring-0 focus:border-secondary transition-all duration-300 placeholder:text-white/20 font-light tracking-wider outline-none" 
                     placeholder="CR-XXXX-XXXX" 
                     type="text"
                     value={accessId}
@@ -84,7 +94,7 @@ export default function AdminLogin() {
                 <label className="block text-[10px] uppercase tracking-[0.3em] text-secondary/70 mb-2 ml-1 font-headline font-bold">Security Key</label>
                 <div className="relative">
                   <input 
-                    className="w-full bg-transparent border-0 border-b border-white/20 py-3 px-1 text-white focus:ring-0 focus:border-secondary transition-all duration-300 placeholder:text-white/20 font-light tracking-wider" 
+                    className="w-full bg-transparent border-0 border-b border-white/20 py-3 px-1 text-white focus:ring-0 focus:border-secondary transition-all duration-300 placeholder:text-white/20 font-light tracking-wider outline-none" 
                     placeholder="••••••••••••" 
                     type="password"
                     value={securityKey}

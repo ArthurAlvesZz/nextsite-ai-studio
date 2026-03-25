@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface MonthGoal {
   totalMonthlySalesGoal: number;
@@ -26,48 +29,54 @@ const DEFAULT_GOALS: GoalSettings = {
 };
 
 export function useGoalSettings() {
-  const [goalSettings, setGoalSettings] = useState<GoalSettings>(() => {
-    const saved = localStorage.getItem('goal_settings');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Migration for old format
-      if (!parsed.months) {
-        return {
-          months: {
-            [new Date().toISOString().substring(0, 7)]: {
-              totalMonthlySalesGoal: parsed.totalMonthlySalesGoal || 50000,
-              totalMonthlyVideoGoal: parsed.totalMonthlyVideoGoal || 100
-            }
-          },
-          defaultIndividualSalesGoal: 5000,
-          defaultIndividualVideoGoal: 10
-        };
-      }
-      return parsed;
-    }
-    return DEFAULT_GOALS;
-  });
+  const [goalSettings, setGoalSettings] = useState<GoalSettings>(DEFAULT_GOALS);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    localStorage.setItem('goal_settings', JSON.stringify(goalSettings));
-  }, [goalSettings]);
+    const docRef = doc(db, 'goals', 'global');
+    
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setGoalSettings(docSnap.data() as GoalSettings);
+      } else {
+        // Initialize with defaults if not exists
+        setDoc(docRef, DEFAULT_GOALS);
+      }
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'goals/global');
+      setLoading(false);
+    });
 
-  const updateGoalSettings = (newGoals: Partial<GoalSettings>) => {
-    setGoalSettings(prev => ({ ...prev, ...newGoals }));
+    return () => unsubscribe();
+  }, []);
+
+  const updateGoalSettings = async (newGoals: Partial<GoalSettings>) => {
+    try {
+      const docRef = doc(db, 'goals', 'global');
+      await setDoc(docRef, { ...goalSettings, ...newGoals }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'goals/global');
+      throw error;
+    }
   };
 
-  const updateMonthGoal = (monthKey: string, goal: Partial<MonthGoal>) => {
-    setGoalSettings(prev => ({
-      ...prev,
-      months: {
-        ...prev.months,
+  const updateMonthGoal = async (monthKey: string, goal: Partial<MonthGoal>) => {
+    try {
+      const docRef = doc(db, 'goals', 'global');
+      const updatedMonths = {
+        ...goalSettings.months,
         [monthKey]: {
-          ...(prev.months[monthKey] || { totalMonthlySalesGoal: 0, totalMonthlyVideoGoal: 0 }),
+          ...(goalSettings.months[monthKey] || { totalMonthlySalesGoal: 0, totalMonthlyVideoGoal: 0 }),
           ...goal
         }
-      }
-    }));
+      };
+      await setDoc(docRef, { months: updatedMonths }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'goals/global');
+      throw error;
+    }
   };
 
-  return { goalSettings, updateGoalSettings, updateMonthGoal };
+  return { goalSettings, updateGoalSettings, updateMonthGoal, loading };
 }

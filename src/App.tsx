@@ -8,10 +8,15 @@ import AdminVideos from './pages/AdminVideos';
 import AdminSales from './pages/AdminSales';
 import AdminTools from './pages/AdminTools';
 import AdminSoraRemover from './pages/AdminSoraRemover';
+import LeadSearch from './pages/LeadSearch';
 import AdminLeads from './pages/AdminLeads';
 import EmployeeProfile from './pages/EmployeeProfile';
-import { motion, useScroll, useTransform } from 'motion/react';
+import ClientLogin from './pages/ClientLogin';
+import ClientDashboard from './pages/ClientDashboard';
+import ProtectedRoute from './components/ProtectedRoute';
+import { motion, useScroll, useTransform, AnimatePresence } from 'motion/react';
 import { useAgencySettings } from './hooks/useAgencySettings';
+import { usePresence } from './hooks/usePresence';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { TextPlugin } from 'gsap/TextPlugin';
@@ -67,16 +72,8 @@ const cases = [
 
 function MainApp() {
   const { settings } = useAgencySettings();
-  const [isReady, setIsReady] = useState(false);
-  const [videoError, setVideoError] = useState(false);
-
-  const handleVideoEnd = () => {
-    setIsReady(true);
-    // Refresh ScrollTrigger after the layout changes
-    setTimeout(() => {
-      ScrollTrigger.refresh();
-    }, 100);
-  };
+  const [isReady, setIsReady] = useState(true); // Set to true by default since we removed the preloader
+  const { onlineUsers } = usePresence();
 
   useEffect(() => {
     // Cinematic Matrix Background Logic
@@ -120,35 +117,6 @@ function MainApp() {
 
   return (
     <div className="font-body selection:bg-primary selection:text-on-primary min-h-screen bg-transparent text-on-background relative">
-      {/* Video Preloader */}
-      {!isReady && (
-        <div className="fixed inset-0 w-full h-full z-[9999] bg-black flex items-center justify-center">
-          <video
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-            onEnded={handleVideoEnd}
-            onError={() => {
-              console.warn("Video failed to load. Skipping preloader.");
-              setVideoError(true);
-              handleVideoEnd();
-            }}
-          >
-            {/* Vídeo do Cloudinary */}
-            <source src={settings.preloaderVideoUrl} type="video/mp4" />
-          </video>
-          
-          {/* Fallback skip button */}
-          <button 
-            onClick={handleVideoEnd}
-            className="absolute bottom-8 right-8 text-white/50 hover:text-white text-xs tracking-widest uppercase font-mono z-10 transition-colors"
-          >
-            Pular Intro
-          </button>
-        </div>
-      )}
-
       {/* Main Content */}
       <div id="main-content" className={`transition-opacity duration-1000 ${isReady ? 'opacity-100' : 'opacity-0'}`}>
         <ImmersiveBackground />
@@ -404,9 +372,9 @@ function Navbar() {
         </div>
         
         <div className="flex items-center gap-6 md:gap-8">
-          <a className="hidden sm:block text-white font-body font-medium text-sm hover:text-primary transition-colors duration-300" href="#">
+          <Link className="hidden sm:block text-white font-body font-medium text-sm hover:text-primary transition-colors duration-300" to="/client/login">
             Área do Cliente
-          </a>
+          </Link>
           <button className={`flex items-center gap-3 border rounded-2xl font-body font-light text-[10px] uppercase tracking-[0.2em] transition-all duration-700 group px-6 py-3 ${
             isScrolled 
               ? 'bg-secondary text-on-secondary border-secondary shadow-2xl scale-105' 
@@ -1394,15 +1362,22 @@ export default function App() {
       <Routes>
         <Route path="/" element={<MainApp />} />
         <Route path="/admin" element={<AdminLogin />} />
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-        <Route path="/admin/settings" element={<AdminSettings />} />
-        <Route path="/admin/clients" element={<AdminClients />} />
-        <Route path="/admin/videos" element={<AdminVideos />} />
-        <Route path="/admin/sales" element={<AdminSales />} />
-        <Route path="/admin/tools" element={<AdminTools />} />
-        <Route path="/admin/sora-remover" element={<AdminSoraRemover />} />
-        <Route path="/admin/leads" element={<AdminLeads />} />
-        <Route path="/admin/team/:id" element={<EmployeeProfile />} />
+        
+        {/* Client Routes */}
+        <Route path="/client/login" element={<ClientLogin />} />
+        <Route path="/client/dashboard" element={<ClientDashboard />} />
+
+        {/* Protected Admin Routes */}
+        <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+        <Route path="/admin/clients" element={<ProtectedRoute><AdminClients /></ProtectedRoute>} />
+        <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />
+        <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />
+        <Route path="/admin/tools" element={<ProtectedRoute><AdminTools /></ProtectedRoute>} />
+        <Route path="/admin/sora-remover" element={<ProtectedRoute><AdminSoraRemover /></ProtectedRoute>} />
+        <Route path="/admin/leads" element={<ProtectedRoute><AdminLeads /></ProtectedRoute>} />
+        <Route path="/admin/leads/search" element={<ProtectedRoute><LeadSearch /></ProtectedRoute>} />
+        <Route path="/admin/team/:id" element={<ProtectedRoute><EmployeeProfile /></ProtectedRoute>} />
       </Routes>
     </BrowserRouter>
   );

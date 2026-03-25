@@ -43,13 +43,17 @@ export default function AdminSales() {
     status: 'Ativo'
   });
 
-  const handleAddClient = (e: React.FormEvent) => {
+  const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newClient = addClient(clientFormData);
-    setClientFormData({ name: '', email: '', niche: '', document: '', instagram: '', whatsapp: '', billedAmount: 0, status: 'Ativo' });
-    setIsClientModalOpen(false);
-    if (newClient) {
-      setSelectedClientId(newClient.id);
+    try {
+      const newClient = await addClient(clientFormData);
+      setClientFormData({ name: '', email: '', niche: '', document: '', instagram: '', whatsapp: '', billedAmount: 0, status: 'Ativo' });
+      setIsClientModalOpen(false);
+      if (newClient) {
+        setSelectedClientId(newClient.id);
+      }
+    } catch (error) {
+      console.error("Error adding client:", error);
     }
   };
 
