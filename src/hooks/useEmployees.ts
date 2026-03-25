@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { useAuth } from './useAuth';
 
 export interface TeamMember {
   id: string;
@@ -13,14 +14,27 @@ export interface TeamMember {
   initials: string;
   monthlySalesGoal?: number;
   monthlyVideoGoal?: number;
+  userId?: string;
+  isOwner?: boolean;
 }
 
 export function useEmployees() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
   useEffect(() => {
-    const q = query(collection(db, 'employees'), orderBy('name', 'asc'));
+    if (!user) {
+      setTeamMembers([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'employees'),
+      where('userId', '==', user.uid),
+      orderBy('name', 'asc')
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const membersData = snapshot.docs.map(doc => ({
@@ -35,13 +49,15 @@ export function useEmployees() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const addMember = async (member: Omit<TeamMember, 'id' | 'lastLogin' | 'initials'>) => {
+    if (!auth.currentUser) throw new Error("Usuário não autenticado");
     try {
       const initials = member.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'NU';
       const newMemberData = {
         ...member,
+        userId: auth.currentUser.uid,
         lastLogin: 'Nunca',
         initials,
         createdAt: new Date().toISOString()

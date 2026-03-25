@@ -80,24 +80,24 @@ export function useAgencySettings() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const docRef = doc(db, 'settings', 'global');
+    // If no user is logged in, use 'global' settings for the public landing page.
+    // If a user is logged in, use their specific settings.
+    const docId = auth.currentUser ? auth.currentUser.uid : 'global';
+    const docRef = doc(db, 'settings', docId);
     
     // Initialize default settings if they don't exist
     const initSettings = async () => {
       try {
         const docSnap = await getDoc(docRef);
         if (!docSnap.exists() && auth.currentUser) {
-          // Only attempt to write if we are logged in.
-          // We wrap this in a try-catch specifically for the write operation
-          // so that if a non-admin user triggers this, it doesn't crash the app.
           try {
             await setDoc(docRef, DEFAULT_SETTINGS);
           } catch (writeError) {
-            console.warn("Could not initialize default settings (likely not an admin):", writeError);
+            console.warn("Could not initialize default settings:", writeError);
           }
         }
       } catch (e) {
-        handleFirestoreError(e, OperationType.GET, 'settings/global');
+        handleFirestoreError(e, OperationType.GET, `settings/${docId}`);
       }
     };
     
@@ -109,19 +109,20 @@ export function useAgencySettings() {
       }
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'settings/global');
+      handleFirestoreError(error, OperationType.GET, `settings/${docId}`);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [auth.currentUser]);
 
   const updateSettings = async (newSettings: Partial<AgencySettings>) => {
+    if (!auth.currentUser) throw new Error("Usuário não autenticado");
     try {
-      const docRef = doc(db, 'settings', 'global');
+      const docRef = doc(db, 'settings', auth.currentUser.uid);
       await setDoc(docRef, { ...settings, ...newSettings }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'settings/global');
+      handleFirestoreError(error, OperationType.UPDATE, `settings/${auth.currentUser.uid}`);
       throw error;
     }
   };

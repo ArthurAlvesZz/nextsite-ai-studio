@@ -14,6 +14,7 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && (
         (request.auth.token.email == "arthurfgalves@gmail.com") ||
+        (request.auth.token.email == "15599873676@nextcreatives.co") ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
     }
@@ -32,6 +33,16 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isOwnerOfDoc() {
+      let docUserId = resource != null ? resource.data.get('userId', null) : null;
+      let reqUserId = request.resource != null ? request.resource.data.get('userId', null) : null;
+      
+      return (request.method == 'create' && (reqUserId == request.auth.uid || reqUserId == null)) ||
+             (request.method == 'update' && (docUserId == request.auth.uid || docUserId == null) && (reqUserId == request.auth.uid || reqUserId == docUserId || reqUserId == null)) ||
+             (request.method == 'delete' && (docUserId == request.auth.uid || docUserId == null)) ||
+             ((request.method == 'get' || request.method == 'list') && (docUserId == request.auth.uid || docUserId == null));
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -40,7 +51,7 @@ service cloud.firestore {
       // Anyone can read the settings (it's the public landing page)
       allow read: if true;
       // Only admins can update settings
-      allow write: if isAdmin();
+      allow write: if isAdmin() && (settingId == 'global' || settingId == request.auth.uid);
     }
     
     match /users/{userId} {
@@ -52,7 +63,7 @@ service cloud.firestore {
     
     match /leadsColhidos/{leadId} {
       // Only admins and editors can read and write leads
-      allow read, write: if isAdminOrEditor();
+      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
     }
     
     match /dorks/{dorkId} {
@@ -62,29 +73,29 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       // Admins and editors can read and write clients
-      allow read, write: if isAdminOrEditor();
+      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
     }
 
     match /sales/{saleId} {
       // Admins and editors can read and write sales
-      allow read, write: if isAdminOrEditor();
+      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
     }
 
     match /demands/{demandId} {
       // Admins and editors can read and write demands
-      allow read, write: if isAdminOrEditor();
+      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
     }
 
     match /employees/{employeeId} {
       // Anyone can read (to show in lists), but only admins can write
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read: if isAuthenticated() && isOwnerOfDoc();
+      allow write: if isAdmin() && isOwnerOfDoc();
     }
 
     match /goals/{goalId} {
       // Admins and editors can read goals, only admins can update
       allow read: if isAdminOrEditor();
-      allow write: if isAdmin();
+      allow write: if isAdmin() && (goalId == 'global' || goalId == request.auth.uid);
     }
     
     match /presence/{sessionId} {

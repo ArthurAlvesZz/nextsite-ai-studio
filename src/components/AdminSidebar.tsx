@@ -133,16 +133,19 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
           onClick={() => setShowLogout(!showLogout)}
           className={`bg-white/[0.02] border border-white/10 p-4 rounded-xl flex items-center gap-3 cursor-pointer transition-all hover:bg-white/[0.05] ${showLogout ? 'border-secondary/50 ring-1 ring-secondary/20' : ''}`}
         >
-          {adminProfile.avatarUrl ? (
-            <img src={adminProfile.avatarUrl} alt="Profile" className="h-10 w-10 rounded-full object-cover border border-white/10 shadow-lg" />
-          ) : (
-            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-secondary to-primary flex items-center justify-center font-headline font-bold text-on-secondary text-sm shadow-lg">
-              {adminProfile.name.substring(0, 2).toUpperCase()}
-            </div>
-          )}
+          <div className="relative">
+            {adminProfile.avatarUrl ? (
+              <img src={adminProfile.avatarUrl} alt="Profile" className="h-10 w-10 rounded-full object-cover border border-white/10 shadow-lg" />
+            ) : (
+              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-secondary to-primary flex items-center justify-center font-headline font-bold text-on-secondary text-sm shadow-lg">
+                {adminProfile.name ? adminProfile.name.substring(0, 2).toUpperCase() : 'AD'}
+              </div>
+            )}
+            <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#0e0e0e] rounded-full"></span>
+          </div>
           <div className="overflow-hidden flex-1">
-            <p className="text-sm font-headline font-bold text-white truncate">{adminProfile.name}</p>
-            <p className="text-[10px] uppercase tracking-widest text-secondary/70 truncate mt-0.5">{adminProfile.phone}</p>
+            <p className="text-sm font-headline font-bold text-white truncate">{adminProfile.name || 'Usuário'}</p>
+            <p className="text-[10px] uppercase tracking-widest text-secondary/70 truncate mt-0.5">{adminProfile.role === 'admin' ? 'Administrador' : 'Editor'}</p>
           </div>
           <span className={`material-symbols-outlined text-white/20 transition-transform duration-300 ${showLogout ? 'rotate-180' : ''}`}>expand_less</span>
         </div>

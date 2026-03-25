@@ -5,7 +5,7 @@ import GlobalSearch from '../components/GlobalSearch';
 import { useEmployees, TeamMember } from '../hooks/useEmployees';
 import { useAgencySettings, PortfolioCase, WorkflowStep } from '../hooks/useAgencySettings';
 import { useGoalSettings } from '../hooks/useGoalSettings';
-import { auth, db } from '../firebase';
+import { auth, db, secondaryAuth } from '../firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
@@ -79,14 +79,22 @@ export default function AdminSettings() {
     if (editingMember) {
       updateMember(editingMember.id, formData);
     } else {
+      if (formData.login === '15599873676') {
+        alert("Este ID de acesso é reservado para o proprietário.");
+        return;
+      }
       try {
-        const userCredential = await createUserWithEmailAndPassword(auth, `${formData.login}@nextcreatives.co`, formData.password);
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, `${formData.login}@nextcreatives.co`, formData.password);
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           role: formData.role === 'Admin' ? 'admin' : 'editor',
           name: formData.name,
           login: formData.login
         });
-        addMember(formData);
+        await addMember({
+          ...formData,
+          userId: userCredential.user.uid // store the new user's uid
+        });
+        await secondaryAuth.signOut(); // sign out the secondary auth instance
       } catch (e) {
         console.error("Erro ao criar usuário no Firebase Auth:", e);
         alert("Erro ao criar usuário: " + (e instanceof Error ? e.message : 'Erro desconhecido'));
@@ -97,6 +105,13 @@ export default function AdminSettings() {
   };
 
   const handleDeleteMember = (id: string) => {
+    const memberToDelete = teamMembers.find(m => m.id === id);
+    if (memberToDelete?.isOwner) {
+      alert("O proprietário não pode ser removido.");
+      handleCloseModal();
+      return;
+    }
+    
     if (isDeleting) {
       deleteMember(id);
       handleCloseModal();
@@ -681,9 +696,10 @@ export default function AdminSettings() {
                 <input 
                   type="text" 
                   required
+                  readOnly={editingMember?.isOwner}
                   value={formData.name}
                   onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light"
+                  className={`w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light ${editingMember?.isOwner ? 'opacity-50 cursor-not-allowed' : ''}`}
                   placeholder="Ex: João Silva"
                 />
               </div>
@@ -692,9 +708,10 @@ export default function AdminSettings() {
                 <input 
                   type="text" 
                   required
+                  readOnly={editingMember?.isOwner}
                   value={formData.login}
                   onChange={(e) => setFormData({...formData, login: e.target.value})}
-                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light"
+                  className={`w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light ${editingMember?.isOwner ? 'opacity-50 cursor-not-allowed' : ''}`}
                   placeholder="Ex: joao.silva"
                 />
               </div>
@@ -703,18 +720,20 @@ export default function AdminSettings() {
                 <input 
                   type="password" 
                   required={!editingMember}
+                  readOnly={editingMember?.isOwner}
                   value={formData.password}
                   onChange={(e) => setFormData({...formData, password: e.target.value})}
-                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light"
+                  className={`w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light ${editingMember?.isOwner ? 'opacity-50 cursor-not-allowed' : ''}`}
                   placeholder="********"
                 />
               </div>
               <div>
                 <label className="block text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold mb-2">Cargo</label>
                 <select 
+                  disabled={editingMember?.isOwner}
                   value={formData.role}
                   onChange={(e) => setFormData({...formData, role: e.target.value})}
-                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white font-light appearance-none"
+                  className={`w-full bg-[#0a0a0a] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white font-light appearance-none ${editingMember?.isOwner ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <option value="Admin">Admin</option>
                   <option value="Editor">Editor</option>
@@ -723,7 +742,7 @@ export default function AdminSettings() {
               </div>
               
               <div className="pt-4 flex gap-3">
-                {editingMember && (
+                {editingMember && !editingMember.isOwner && (
                   <button 
                     type="button"
                     onClick={() => handleDeleteMember(editingMember.id)}
@@ -734,7 +753,7 @@ export default function AdminSettings() {
                 )}
                 <button 
                   type="submit"
-                  className="flex-[2] bg-gradient-to-r from-secondary to-primary text-on-secondary py-3 rounded-xl font-headline font-bold text-xs uppercase tracking-widest transition-all active:scale-95 shadow-[0_0_20px_rgba(233,179,255,0.2)] hover:shadow-[0_0_30px_rgba(233,179,255,0.4)]"
+                  className={`${editingMember?.isOwner ? 'w-full' : 'flex-[2]'} bg-gradient-to-r from-secondary to-primary text-on-secondary py-3 rounded-xl font-headline font-bold text-xs uppercase tracking-widest transition-all active:scale-95 shadow-[0_0_20px_rgba(233,179,255,0.2)] hover:shadow-[0_0_30px_rgba(233,179,255,0.4)]`}
                 >
                   {editingMember ? 'Salvar Alterações' : 'Criar Acesso'}
                 </button>

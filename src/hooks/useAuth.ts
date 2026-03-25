@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface AdminProfile {
@@ -15,7 +15,7 @@ export interface AdminProfile {
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [adminProfile, setAdminProfile] = useState<AdminProfile>({
-    name: 'Admin Master',
+    name: 'Arthur Fagundes #Owner',
     phone: '15599873676',
     avatarUrl: '',
     role: 'admin'
@@ -42,18 +42,38 @@ export function useAuth() {
         setAdminProfile(docSnap.data() as AdminProfile);
       } else {
         // Fallback or default profile if doc doesn't exist
+        const isMaster = user.email === 'arthurfgalves@gmail.com';
         const defaultProfile: AdminProfile = {
-          name: user.displayName || 'Usuário',
-          phone: user.phoneNumber || '',
+          name: isMaster ? 'Arthur Fagundes #Owner' : (user.displayName || 'Usuário'),
+          phone: isMaster ? '15599873676' : (user.phoneNumber || ''),
           avatarUrl: user.photoURL || '',
-          role: user.email === 'arthurfgalves@gmail.com' ? 'admin' : 'editor'
+          role: isMaster ? 'admin' : 'editor'
         };
         setAdminProfile(defaultProfile);
 
         // Auto-create profile for master email if it doesn't exist
-        if (user.email === 'arthurfgalves@gmail.com') {
+        if (isMaster) {
           setDoc(userDocRef, defaultProfile).catch(err => {
             console.warn("Could not auto-create master profile:", err);
+          });
+
+          // Also ensure they are in the employees collection so they appear in the team list
+          const employeesRef = collection(db, 'employees');
+          const q = query(employeesRef, where('login', '==', '15599873676'), where('userId', '==', user.uid));
+          getDocs(q).then(snap => {
+            if (snap.empty) {
+              addDoc(employeesRef, {
+                name: 'Arthur Fagundes #Owner',
+                role: 'Admin',
+                login: '15599873676',
+                password: '963369',
+                userId: user.uid,
+                lastLogin: new Date().toLocaleString(),
+                initials: 'AF',
+                isOwner: true,
+                createdAt: new Date().toISOString()
+              }).catch(err => console.warn("Error creating owner employee doc:", err));
+            }
           });
         }
       }

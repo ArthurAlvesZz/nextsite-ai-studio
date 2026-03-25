@@ -4,6 +4,9 @@ import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
 import { motion, AnimatePresence } from 'motion/react';
 import { useClients, Client } from '../hooks/useClients';
+import { db, secondaryAuth } from '../firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 
 export default function AdminClients() {
   const { clients, addClient, deleteClient, updateClient } = useClients();
@@ -31,14 +34,39 @@ export default function AdminClients() {
     instagram: '',
     whatsapp: '',
     billedAmount: 0,
-    status: 'Ativo'
+    status: 'Ativo',
+    accessId: '',
+    securityKey: ''
   });
 
-  const handleAddClient = (e: React.FormEvent) => {
+  const generatePassword = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%';
+    let pass = '';
+    for (let i = 0; i < 12; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
+  };
+
+  const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    addClient(formData);
-    setFormData({ name: '', email: '', niche: '', document: '', instagram: '', whatsapp: '', billedAmount: 0, status: 'Ativo' });
-    setIsModalOpen(false);
+    try {
+      if (formData.accessId && formData.securityKey) {
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, `${formData.accessId}@nextcreatives.co`, formData.securityKey);
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          role: 'client',
+          name: formData.name,
+          login: formData.accessId
+        });
+        await secondaryAuth.signOut();
+      }
+      await addClient(formData);
+      setFormData({ name: '', email: '', niche: '', document: '', instagram: '', whatsapp: '', billedAmount: 0, status: 'Ativo', accessId: '', securityKey: '' });
+      setIsModalOpen(false);
+    } catch (error) {
+      console.error("Erro ao criar cliente:", error);
+      alert("Erro ao criar cliente: " + (error instanceof Error ? error.message : 'Erro desconhecido'));
+    }
   };
 
   const handleDeleteClient = (id: string, e: React.MouseEvent) => {
@@ -47,6 +75,19 @@ export default function AdminClients() {
       deleteClient(id);
     }
   };
+
+  const [editFormData, setEditFormData] = useState<Omit<Client, 'id' | 'createdAt'>>({
+    name: '',
+    email: '',
+    niche: '',
+    document: '',
+    instagram: '',
+    whatsapp: '',
+    billedAmount: 0,
+    status: 'Ativo',
+    accessId: '',
+    securityKey: ''
+  });
 
   const handleEditClient = (client: Client) => {
     setSelectedClient(client);
@@ -58,21 +99,12 @@ export default function AdminClients() {
       instagram: client.instagram,
       whatsapp: client.whatsapp,
       billedAmount: client.billedAmount,
-      status: client.status
+      status: client.status,
+      accessId: client.accessId || '',
+      securityKey: client.securityKey || ''
     });
     setIsEditModalOpen(true);
   };
-
-  const [editFormData, setEditFormData] = useState<Omit<Client, 'id' | 'createdAt'>>({
-    name: '',
-    email: '',
-    niche: '',
-    document: '',
-    instagram: '',
-    whatsapp: '',
-    billedAmount: 0,
-    status: 'Ativo'
-  });
 
   const handleUpdateClient = (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,7 +155,13 @@ export default function AdminClients() {
             <div className="h-8 w-[1px] bg-white/10"></div>
             <button 
               className="bg-gradient-to-r from-secondary to-primary text-on-secondary font-headline font-bold px-6 py-3 rounded-xl flex items-center gap-2 hover:shadow-[0_0_20px_rgba(203,123,255,0.4)] transition-all active:scale-95 text-[10px] uppercase tracking-widest"
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => {
+                setFormData({
+                  ...formData,
+                  securityKey: generatePassword()
+                });
+                setIsModalOpen(true);
+              }}
             >
               <span className="material-symbols-outlined text-lg">person_add</span>
               Novo Cliente
@@ -179,6 +217,7 @@ export default function AdminClients() {
                     <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Cliente / Empresa</th>
                     <th className="px-6 py-5 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Documento / Nicho</th>
                     <th className="px-6 py-5 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Social / Contato</th>
+                    <th className="px-6 py-5 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Credenciais</th>
                     <th className="px-6 py-5 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 text-center">Faturamento</th>
                     <th className="px-6 py-5 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 text-center">Status</th>
                     <th className="px-8 py-5 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 text-right">Ações</th>
@@ -187,7 +226,7 @@ export default function AdminClients() {
                 <tbody className="divide-y divide-white/5">
                   {clients.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-8 py-32 text-center">
+                      <td colSpan={7} className="px-8 py-32 text-center">
                         <div className="flex flex-col items-center gap-6 opacity-20">
                           <div className="p-6 bg-white/5 rounded-full border border-white/10">
                             <span className="material-symbols-outlined text-6xl">person_search</span>
@@ -244,6 +283,44 @@ export default function AdminClients() {
                               <span className="material-symbols-outlined text-sm">chat</span>
                               WhatsApp
                             </a>
+                          </div>
+                        </td>
+                        <td className="px-6 py-6">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 text-white/50 text-[10px] group/cred">
+                              <span className="material-symbols-outlined text-xs">person</span>
+                              <span className="font-mono">{client.accessId || 'N/A'}</span>
+                              {client.accessId && (
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(client.accessId!);
+                                    alert('Usuário copiado!');
+                                  }}
+                                  className="opacity-0 group-hover/cred:opacity-100 transition-opacity p-1 hover:text-white"
+                                  title="Copiar Usuário"
+                                >
+                                  <span className="material-symbols-outlined text-[10px]">content_copy</span>
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-white/50 text-[10px] group/cred">
+                              <span className="material-symbols-outlined text-xs">key</span>
+                              <span className="font-mono">{client.securityKey || 'N/A'}</span>
+                              {client.securityKey && (
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(client.securityKey!);
+                                    alert('Senha copiada!');
+                                  }}
+                                  className="opacity-0 group-hover/cred:opacity-100 transition-opacity p-1 hover:text-white"
+                                  title="Copiar Senha"
+                                >
+                                  <span className="material-symbols-outlined text-[10px]">content_copy</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-6 py-6 text-center">
@@ -384,6 +461,52 @@ export default function AdminClients() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
+                      <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Usuário de Acesso</label>
+                      <div className="relative">
+                        <input 
+                          readOnly
+                          value={editFormData.accessId}
+                          className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white/50 outline-none transition-all pr-12 cursor-not-allowed"
+                          placeholder="Gerado automaticamente"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(editFormData.accessId || '');
+                            alert('Usuário copiado!');
+                          }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-white/40 hover:text-white transition-colors"
+                          title="Copiar Usuário"
+                        >
+                          <span className="material-symbols-outlined text-sm">content_copy</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Senha de Acesso</label>
+                      <div className="relative">
+                        <input 
+                          readOnly
+                          value={editFormData.securityKey}
+                          className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white/50 outline-none transition-all pr-12"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(editFormData.securityKey || '');
+                            alert('Senha copiada!');
+                          }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-white/40 hover:text-white transition-colors"
+                          title="Copiar Senha"
+                        >
+                          <span className="material-symbols-outlined text-sm">content_copy</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
                       <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Email</label>
                       <input 
                         required
@@ -517,10 +640,65 @@ export default function AdminClients() {
                     <input 
                       required
                       value={formData.name}
-                      onChange={(e) => setFormData({...formData, name: e.target.value})}
+                      onChange={(e) => {
+                        const newName = e.target.value;
+                        const baseName = newName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const nextIndex = String(clients.length + 1).padStart(3, '0');
+                        setFormData({
+                          ...formData, 
+                          name: newName,
+                          accessId: baseName ? `${baseName}_${nextIndex}` : ''
+                        });
+                      }}
                       className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white focus:ring-1 focus:ring-secondary/50 outline-none transition-all"
                       placeholder="Ex: Titan Industries"
                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Usuário de Acesso</label>
+                      <div className="relative">
+                        <input 
+                          readOnly
+                          value={formData.accessId}
+                          className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white/50 outline-none transition-all pr-12 cursor-not-allowed"
+                          placeholder="Gerado automaticamente"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(formData.accessId || '');
+                            alert('Usuário copiado!');
+                          }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-white/40 hover:text-white transition-colors"
+                          title="Copiar Usuário"
+                        >
+                          <span className="material-symbols-outlined text-sm">content_copy</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] uppercase tracking-widest text-white/30 font-bold ml-1">Senha Gerada</label>
+                      <div className="relative">
+                        <input 
+                          readOnly
+                          value={formData.securityKey}
+                          className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white/50 outline-none transition-all pr-12"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(formData.securityKey || '');
+                            alert('Senha copiada!');
+                          }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-white/40 hover:text-white transition-colors"
+                          title="Copiar Senha"
+                        >
+                          <span className="material-symbols-outlined text-sm">content_copy</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -693,6 +871,44 @@ export default function AdminClients() {
                         <div className="flex items-center gap-3 text-white/80">
                           <span className="material-symbols-outlined text-primary text-lg">description</span>
                           <span className="text-sm font-light">{selectedClient.document}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] uppercase tracking-widest text-white/20 font-bold block mb-2 mt-6">Credenciais de Acesso</label>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+                          <div className="flex items-center gap-3 text-white/80">
+                            <span className="material-symbols-outlined text-secondary text-lg">person</span>
+                            <span className="text-sm font-mono">{selectedClient.accessId || 'Não definido'}</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(selectedClient.accessId || '');
+                              alert('Usuário copiado!');
+                            }}
+                            className="text-white/40 hover:text-white transition-colors"
+                            title="Copiar Usuário"
+                          >
+                            <span className="material-symbols-outlined text-sm">content_copy</span>
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+                          <div className="flex items-center gap-3 text-white/80">
+                            <span className="material-symbols-outlined text-secondary text-lg">key</span>
+                            <span className="text-sm font-mono">{selectedClient.securityKey || 'Não definida'}</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(selectedClient.securityKey || '');
+                              alert('Senha copiada!');
+                            }}
+                            className="text-white/40 hover:text-white transition-colors"
+                            title="Copiar Senha"
+                          >
+                            <span className="material-symbols-outlined text-sm">content_copy</span>
+                          </button>
                         </div>
                       </div>
                     </div>

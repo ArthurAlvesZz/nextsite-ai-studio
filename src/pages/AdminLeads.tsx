@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, deleteDoc, doc, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { useEffect } from 'react';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { useAuth } from '../hooks/useAuth';
 
 interface Lead {
   id: string;
@@ -21,6 +21,7 @@ interface Lead {
   logo?: string;
   abordagemWhatsApp?: string;
   createdAt: string;
+  userId?: string;
 }
 
 export default function AdminLeads() {
@@ -28,9 +29,20 @@ export default function AdminLeads() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNiche, setSelectedNiche] = useState('Todos');
+  const { user } = useAuth();
 
   useEffect(() => {
-    const q = query(collection(db, 'leadsColhidos'), orderBy('createdAt', 'desc'));
+    if (!user) {
+      setLeads([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'leadsColhidos'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const leadsData = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -44,7 +56,7 @@ export default function AdminLeads() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const niches = useMemo(() => {
     const uniqueNiches = Array.from(new Set(leads.map(l => l.nicho)));

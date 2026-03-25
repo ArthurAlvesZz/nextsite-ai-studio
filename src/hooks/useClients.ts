@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { useAuth } from './useAuth';
 
 export interface Client {
   id: string;
@@ -14,15 +15,29 @@ export interface Client {
   billedAmount: number;
   status: 'Ativo' | 'Inativo';
   createdAt: string;
+  accessId?: string;
+  securityKey?: string;
+  userId?: string;
 }
 
 export function useClients() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
   useEffect(() => {
+    if (!user) {
+      setClients([]);
+      setLoading(false);
+      return;
+    }
+
     const path = 'clients';
-    const q = query(collection(db, path), orderBy('createdAt', 'desc'));
+    const q = query(
+      collection(db, path),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const clientsData = snapshot.docs.map(doc => ({
@@ -37,16 +52,19 @@ export function useClients() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const addClient = async (client: Omit<Client, 'id' | 'createdAt'>) => {
+    if (!auth.currentUser) throw new Error("Usuário não autenticado");
     const path = 'clients';
     try {
-      const docRef = await addDoc(collection(db, path), {
+      const newClientData = {
         ...client,
+        userId: auth.currentUser.uid,
         createdAt: new Date().toISOString()
-      });
-      return { id: docRef.id, ...client, createdAt: new Date().toISOString() };
+      };
+      const docRef = await addDoc(collection(db, path), newClientData);
+      return { id: docRef.id, ...newClientData };
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { useAuth } from './useAuth';
 
 export interface VideoDemand {
   id: string;
@@ -22,14 +23,26 @@ export interface VideoDemand {
   assignedToName?: string;
   finishedAt?: string;
   revisionCount?: number;
+  userId?: string;
 }
 
 export function useDemands() {
   const [demands, setDemands] = useState<VideoDemand[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
   useEffect(() => {
-    const q = query(collection(db, 'demands'), orderBy('createdAt', 'desc'));
+    if (!user) {
+      setDemands([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'demands'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const demandsData = snapshot.docs.map(doc => ({
@@ -44,12 +57,14 @@ export function useDemands() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const addDemand = async (demand: Omit<VideoDemand, 'id' | 'createdAt'>) => {
+    if (!auth.currentUser) throw new Error("Usuário não autenticado");
     try {
       const newDemandData = {
         ...demand,
+        userId: auth.currentUser.uid,
         createdAt: new Date().toISOString()
       };
       const docRef = await addDoc(collection(db, 'demands'), newDemandData);

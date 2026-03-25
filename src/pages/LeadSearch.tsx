@@ -13,10 +13,18 @@ export default function LeadSearch() {
   const [results, setResults] = useState<LeadColhido[]>([]);
   const [savedLeadUrls, setSavedLeadUrls] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
-  const { adminProfile } = useAuth();
+  const { adminProfile, user } = useAuth();
 
   useEffect(() => {
-    const q = query(collection(db, 'leadsColhidos'));
+    if (!user) {
+      setSavedLeadUrls(new Set());
+      return;
+    }
+
+    const q = query(
+      collection(db, 'leadsColhidos'),
+      where('userId', '==', user.uid)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const urls = new Set(snapshot.docs.map(doc => doc.data().url));
       setSavedLeadUrls(urls);
@@ -24,7 +32,7 @@ export default function LeadSearch() {
       handleFirestoreError(error, OperationType.LIST, 'leadsColhidos');
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,10 +78,15 @@ export default function LeadSearch() {
   };
 
   const toggleSaveLead = async (lead: LeadColhido) => {
+    if (!auth.currentUser) return;
     try {
       if (savedLeadUrls.has(lead.url)) {
         // Remove from saved
-        const q = query(collection(db, 'leadsColhidos'), where('url', '==', lead.url));
+        const q = query(
+          collection(db, 'leadsColhidos'), 
+          where('url', '==', lead.url),
+          where('userId', '==', auth.currentUser.uid)
+        );
         const snapshot = await getDocs(q);
         snapshot.forEach(async (document) => {
           await deleteDoc(doc(db, 'leadsColhidos', document.id));
@@ -82,6 +95,7 @@ export default function LeadSearch() {
         // Add to saved
         await addDoc(collection(db, 'leadsColhidos'), {
           ...lead,
+          userId: auth.currentUser.uid,
           createdAt: new Date().toISOString()
         });
       }

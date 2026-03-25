@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface MonthGoal {
@@ -33,37 +33,45 @@ export function useGoalSettings() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const docRef = doc(db, 'goals', 'global');
+    if (!auth.currentUser) {
+      setLoading(false);
+      return;
+    }
+
+    const docId = auth.currentUser.uid;
+    const docRef = doc(db, 'goals', docId);
     
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         setGoalSettings(docSnap.data() as GoalSettings);
       } else {
         // Initialize with defaults if not exists
-        setDoc(docRef, DEFAULT_GOALS);
+        setDoc(docRef, DEFAULT_GOALS).catch(e => console.warn("Could not initialize default goals", e));
       }
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'goals/global');
+      handleFirestoreError(error, OperationType.GET, `goals/${docId}`);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [auth.currentUser]);
 
   const updateGoalSettings = async (newGoals: Partial<GoalSettings>) => {
+    if (!auth.currentUser) throw new Error("Usuário não autenticado");
     try {
-      const docRef = doc(db, 'goals', 'global');
+      const docRef = doc(db, 'goals', auth.currentUser.uid);
       await setDoc(docRef, { ...goalSettings, ...newGoals }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'goals/global');
+      handleFirestoreError(error, OperationType.UPDATE, `goals/${auth.currentUser.uid}`);
       throw error;
     }
   };
 
   const updateMonthGoal = async (monthKey: string, goal: Partial<MonthGoal>) => {
+    if (!auth.currentUser) throw new Error("Usuário não autenticado");
     try {
-      const docRef = doc(db, 'goals', 'global');
+      const docRef = doc(db, 'goals', auth.currentUser.uid);
       const updatedMonths = {
         ...goalSettings.months,
         [monthKey]: {
@@ -73,7 +81,7 @@ export function useGoalSettings() {
       };
       await setDoc(docRef, { months: updatedMonths }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'goals/global');
+      handleFirestoreError(error, OperationType.UPDATE, `goals/${auth.currentUser.uid}`);
       throw error;
     }
   };

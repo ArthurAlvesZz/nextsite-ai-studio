@@ -13,6 +13,10 @@ import AdminLeads from './pages/AdminLeads';
 import EmployeeProfile from './pages/EmployeeProfile';
 import ClientLogin from './pages/ClientLogin';
 import ClientDashboard from './pages/ClientDashboard';
+import ClientProjects from './pages/ClientProjects';
+import ClientPurchases from './pages/ClientPurchases';
+import ClientFiles from './pages/ClientFiles';
+import ClientSupport from './pages/ClientSupport';
 import ProtectedRoute from './components/ProtectedRoute';
 import { motion, useScroll, useTransform, AnimatePresence } from 'motion/react';
 import { useAgencySettings } from './hooks/useAgencySettings';
@@ -1366,6 +1370,10 @@ export default function App() {
         {/* Client Routes */}
         <Route path="/client/login" element={<ClientLogin />} />
         <Route path="/client/dashboard" element={<ClientDashboard />} />
+        <Route path="/client/projects" element={<ClientProjects />} />
+        <Route path="/client/purchases" element={<ClientPurchases />} />
+        <Route path="/client/files" element={<ClientFiles />} />
+        <Route path="/client/support" element={<ClientSupport />} />
 
         {/* Protected Admin Routes */}
         <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />

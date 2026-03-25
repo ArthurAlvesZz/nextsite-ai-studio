@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
+import { useAuth } from './useAuth';
 
 export interface Sale {
   id: string;
@@ -16,14 +17,26 @@ export interface Sale {
   pixReceipt?: string;
   hasDemand?: boolean;
   createdAt?: string;
+  userId?: string;
 }
 
 export function useSales() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
   useEffect(() => {
-    const q = query(collection(db, 'sales'), orderBy('createdAt', 'desc'));
+    if (!user) {
+      setSales([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'sales'), 
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const salesData = snapshot.docs.map(doc => ({
@@ -38,16 +51,19 @@ export function useSales() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
-  const addSale = async (sale: Omit<Sale, 'id' | 'date' | 'status' | 'hasDemand' | 'createdAt'>) => {
+  const addSale = async (sale: Omit<Sale, 'id' | 'date' | 'status' | 'hasDemand' | 'createdAt' | 'userId'>) => {
+    if (!user) throw new Error("Usuário não autenticado");
+    
     try {
       const newSaleData = {
         ...sale,
         date: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }),
         createdAt: new Date().toISOString(),
         status: 'Confirmado',
-        hasDemand: false
+        hasDemand: false,
+        userId: user.uid
       };
       const docRef = await addDoc(collection(db, 'sales'), newSaleData);
       return { id: docRef.id, ...newSaleData };
