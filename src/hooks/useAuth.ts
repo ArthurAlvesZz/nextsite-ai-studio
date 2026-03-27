@@ -37,12 +37,29 @@ export function useAuth() {
 
     // Listen to user profile in Firestore
     const userDocRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
+    const unsubscribe = onSnapshot(userDocRef, async (docSnap) => {
       if (docSnap.exists()) {
         setAdminProfile(docSnap.data() as AdminProfile);
       } else {
         // Fallback or default profile if doc doesn't exist
-        const isMaster = user.email === 'arthurfgalves@gmail.com';
+        let isMaster = user.email === 'arthurfgalves@gmail.com' || user.email === '15599873676@nextcreatives.co';
+        
+        // Check if they are an owner in the employees collection
+        if (!isMaster) {
+          try {
+            const employeeDocRef = doc(db, 'employees', user.uid);
+            const employeeSnap = await getDocs(query(collection(db, 'employees'), where('userId', '==', user.uid)));
+            if (!employeeSnap.empty) {
+              const employeeData = employeeSnap.docs[0].data();
+              if (employeeData.isOwner) {
+                isMaster = true;
+              }
+            }
+          } catch (e) {
+            console.error("Error checking employee owner status:", e);
+          }
+        }
+
         const defaultProfile: AdminProfile = {
           name: isMaster ? 'Arthur Fagundes #Owner' : (user.displayName || 'Usuário'),
           phone: isMaster ? '15599873676' : (user.phoneNumber || ''),
@@ -58,11 +75,10 @@ export function useAuth() {
           });
 
           // Also ensure they are in the employees collection so they appear in the team list
-          const employeesRef = collection(db, 'employees');
-          const q = query(employeesRef, where('login', '==', '15599873676'), where('userId', '==', user.uid));
-          getDocs(q).then(snap => {
+          const employeeDocRef = doc(db, 'employees', user.uid);
+          getDocs(query(collection(db, 'employees'), where('userId', '==', user.uid))).then(snap => {
             if (snap.empty) {
-              addDoc(employeesRef, {
+              setDoc(employeeDocRef, {
                 name: 'Arthur Fagundes #Owner',
                 role: 'Admin',
                 login: '15599873676',

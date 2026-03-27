@@ -15,12 +15,10 @@ import ClientLogin from './pages/ClientLogin';
 import ClientDashboard from './pages/ClientDashboard';
 import ClientProjects from './pages/ClientProjects';
 import ClientPurchases from './pages/ClientPurchases';
-import ClientFiles from './pages/ClientFiles';
-import ClientSupport from './pages/ClientSupport';
+import ClientSettings from './pages/ClientSettings';
 import ProtectedRoute from './components/ProtectedRoute';
 import { motion, useScroll, useTransform, AnimatePresence } from 'motion/react';
 import { useAgencySettings } from './hooks/useAgencySettings';
-import { usePresence } from './hooks/usePresence';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { TextPlugin } from 'gsap/TextPlugin';
@@ -77,7 +75,6 @@ const cases = [
 function MainApp() {
   const { settings } = useAgencySettings();
   const [isReady, setIsReady] = useState(true); // Set to true by default since we removed the preloader
-  const { onlineUsers } = usePresence();
 
   useEffect(() => {
     // Cinematic Matrix Background Logic
@@ -1360,33 +1357,36 @@ function Pricing() {
   );
 }
 
+import { PresenceProvider } from './hooks/usePresence';
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<MainApp />} />
-        <Route path="/admin" element={<AdminLogin />} />
-        
-        {/* Client Routes */}
-        <Route path="/client/login" element={<ClientLogin />} />
-        <Route path="/client/dashboard" element={<ClientDashboard />} />
-        <Route path="/client/projects" element={<ClientProjects />} />
-        <Route path="/client/purchases" element={<ClientPurchases />} />
-        <Route path="/client/files" element={<ClientFiles />} />
-        <Route path="/client/support" element={<ClientSupport />} />
+      <PresenceProvider>
+        <Routes>
+          <Route path="/" element={<MainApp />} />
+          <Route path="/admin" element={<AdminLogin />} />
+          
+          {/* Client Routes */}
+          <Route path="/client/login" element={<ClientLogin />} />
+          <Route path="/client/dashboard" element={<ClientDashboard />} />
+          <Route path="/client/projects" element={<ClientProjects />} />
+          <Route path="/client/purchases" element={<ClientPurchases />} />
+          <Route path="/client/settings" element={<ClientSettings />} />
 
-        {/* Protected Admin Routes */}
-        <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-        <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
-        <Route path="/admin/clients" element={<ProtectedRoute><AdminClients /></ProtectedRoute>} />
-        <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />
-        <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />
-        <Route path="/admin/tools" element={<ProtectedRoute><AdminTools /></ProtectedRoute>} />
-        <Route path="/admin/sora-remover" element={<ProtectedRoute><AdminSoraRemover /></ProtectedRoute>} />
-        <Route path="/admin/leads" element={<ProtectedRoute><AdminLeads /></ProtectedRoute>} />
-        <Route path="/admin/leads/search" element={<ProtectedRoute><LeadSearch /></ProtectedRoute>} />
-        <Route path="/admin/team/:id" element={<ProtectedRoute><EmployeeProfile /></ProtectedRoute>} />
-      </Routes>
+          {/* Protected Admin Routes */}
+          <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/clients" element={<ProtectedRoute><AdminClients /></ProtectedRoute>} />
+          <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />
+          <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />
+          <Route path="/admin/tools" element={<ProtectedRoute><AdminTools /></ProtectedRoute>} />
+          <Route path="/admin/sora-remover" element={<ProtectedRoute><AdminSoraRemover /></ProtectedRoute>} />
+          <Route path="/admin/leads" element={<ProtectedRoute><AdminLeads /></ProtectedRoute>} />
+          <Route path="/admin/leads/search" element={<ProtectedRoute><LeadSearch /></ProtectedRoute>} />
+          <Route path="/admin/team/:id" element={<ProtectedRoute><EmployeeProfile /></ProtectedRoute>} />
+        </Routes>
+      </PresenceProvider>
     </BrowserRouter>
   );
 }

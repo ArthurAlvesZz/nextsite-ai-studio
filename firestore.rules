@@ -11,11 +11,19 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    function isAdmin() {
+    function isMasterOwner() {
       return isAuthenticated() && (
         (request.auth.token.email == "arthurfgalves@gmail.com") ||
         (request.auth.token.email == "15599873676@nextcreatives.co") ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) && get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.isOwner == true)
+      );
+    }
+
+    function isAdmin() {
+      return isMasterOwner() || (
+        isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
       );
     }
 
@@ -33,16 +41,6 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isOwnerOfDoc() {
-      let docUserId = resource != null ? resource.data.get('userId', null) : null;
-      let reqUserId = request.resource != null ? request.resource.data.get('userId', null) : null;
-      
-      return (request.method == 'create' && (reqUserId == request.auth.uid || reqUserId == null)) ||
-             (request.method == 'update' && (docUserId == request.auth.uid || docUserId == null) && (reqUserId == request.auth.uid || reqUserId == docUserId || reqUserId == null)) ||
-             (request.method == 'delete' && (docUserId == request.auth.uid || docUserId == null)) ||
-             ((request.method == 'get' || request.method == 'list') && (docUserId == request.auth.uid || docUserId == null));
-    }
-
     // ===============================================================
     // Rules
     // ===============================================================
@@ -57,13 +55,22 @@ service cloud.firestore {
     match /users/{userId} {
       // Users can read their own profile, admins can read all
       allow read: if isOwner(userId) || isAdmin();
-      // Only admins can create or update users
-      allow write: if isAdmin();
+      
+      // Prevent deleting the owner document
+      allow delete: if isAdmin() && resource.data.role != 'admin' && resource.data.name != 'Arthur Fagundes #Owner';
+      
+      // Prevent demoting the owner
+      allow update: if isAdmin() && (
+        resource.data.role != 'admin' || 
+        request.resource.data.role == 'admin'
+      );
+      
+      allow create: if isAdmin();
     }
     
     match /leadsColhidos/{leadId} {
       // Only admins and editors can read and write leads
-      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
+      allow read, write: if isAdminOrEditor();
     }
     
     match /dorks/{dorkId} {
@@ -73,23 +80,33 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       // Admins and editors can read and write clients
-      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
+      allow read, write: if isAdminOrEditor();
     }
 
     match /sales/{saleId} {
       // Admins and editors can read and write sales
-      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
+      allow read, write: if isAdminOrEditor();
     }
 
     match /demands/{demandId} {
       // Admins and editors can read and write demands
-      allow read, write: if isAdminOrEditor() && isOwnerOfDoc();
+      allow read, write: if isAdminOrEditor();
     }
 
     match /employees/{employeeId} {
       // Anyone can read (to show in lists), but only admins can write
-      allow read: if isAuthenticated() && isOwnerOfDoc();
-      allow write: if isAdmin() && isOwnerOfDoc();
+      allow read: if isAuthenticated();
+      
+      // Prevent deleting the owner document
+      allow delete: if isAdmin() && resource.data.isOwner != true;
+      
+      // Prevent modifying the isOwner flag or role of the owner
+      allow update: if isAdmin() && (
+        resource.data.isOwner != true || 
+        (request.resource.data.isOwner == true && request.resource.data.role == 'Admin')
+      );
+      
+      allow create: if isAdmin();
     }
 
     match /goals/{goalId} {

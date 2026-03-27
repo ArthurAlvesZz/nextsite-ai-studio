@@ -41,7 +41,7 @@ export default function AdminDashboard() {
   const { demands } = useDemands();
   const { teamMembers } = useEmployees();
   const { goalSettings } = useGoalSettings();
-  const { onlineUsers } = usePresence();
+  const { onlineAdminUsers } = usePresence();
   
   // Helper to parse date from sales (format: "22 Mar, 2024")
   const parseSaleDate = (sale: Sale) => {
@@ -418,7 +418,7 @@ export default function AdminDashboard() {
               <div className="relative z-10">
                 <p className="text-white/40 text-[10px] font-bold uppercase tracking-[0.2em] mb-2">Usuários Online</p>
                 <div className="flex items-baseline gap-2">
-                  <h3 className="text-3xl font-headline font-extrabold text-white tracking-tight">{onlineUsers}</h3>
+                  <h3 className="text-3xl font-headline font-extrabold text-white tracking-tight">{onlineAdminUsers}</h3>
                   <span className="text-emerald-400 text-xs font-bold uppercase tracking-widest animate-pulse">Agora</span>
                 </div>
               </div>

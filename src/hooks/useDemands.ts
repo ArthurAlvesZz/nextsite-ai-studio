@@ -40,7 +40,6 @@ export function useDemands() {
 
     const q = query(
       collection(db, 'demands'),
-      where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
     

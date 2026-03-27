@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { auth } from '../firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth, db } from '../firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 export default function AdminLogin() {
   const [accessId, setAccessId] = useState('');
@@ -13,29 +14,80 @@ export default function AdminLogin() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check for master admin credentials first
-    if (accessId === '15599873676' && securityKey === '963369') {
-      try {
-        // Try to sign in with the master email
-        await signInWithEmailAndPassword(auth, 'arthurfgalves@gmail.com', securityKey);
-        navigate('/admin/dashboard');
-        return;
-      } catch (e) {
-        console.warn("Master login via email failed, trying fallback...", e);
-        // Fallback: maybe they haven't created the account yet?
-        // In a real app, we'd handle this better. 
-        // For now, we MUST sign in to avoid permission errors.
-      }
-    }
-
-    // Proceed with Firebase Auth for other users
     try {
       const email = accessId.includes('@') ? accessId : `${accessId}@nextcreatives.co`;
       await signInWithEmailAndPassword(auth, email, securityKey);
+      
+      // If login successful, check if it's the owner
+      if (accessId === '15599873676' || email === '15599873676@nextcreatives.co') {
+        const user = auth.currentUser;
+        if (user) {
+          const docRef = doc(db, 'employees', user.uid);
+          const docSnap = await getDoc(docRef);
+          if (!docSnap.exists()) {
+            await setDoc(docRef, {
+              name: 'Arthur Fagundes #Owner',
+              email: email,
+              role: 'Admin',
+              login: '15599873676',
+              password: securityKey,
+              initials: 'AF',
+              lastLogin: new Date().toLocaleString(),
+              isOwner: true,
+              userId: user.uid,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            });
+          } else {
+            const data = docSnap.data();
+            if (!data.isOwner || data.userId !== user.uid || !data.login || !data.initials) {
+              await setDoc(docRef, {
+                ...data,
+                name: 'Arthur Fagundes #Owner',
+                role: 'Admin',
+                login: '15599873676',
+                initials: 'AF',
+                isOwner: true,
+                userId: user.uid,
+                updatedAt: Date.now()
+              });
+            }
+          }
+        }
+      }
+      
       navigate('/admin/dashboard');
-    } catch (e) {
-      console.error("Erro ao logar no Firebase Auth:", e);
-      setError('Invalid Access ID or Security Key');
+    } catch (e: any) {
+      // If user doesn't exist and it's the owner's default credentials, create it
+      if (accessId === '15599873676' && securityKey === '15599873676' && (e.code === 'auth/user-not-found' || e.code === 'auth/invalid-credential')) {
+        try {
+          const ownerEmail = '15599873676@nextcreatives.co';
+          const userCredential = await createUserWithEmailAndPassword(auth, ownerEmail, securityKey);
+          const user = userCredential.user;
+          
+          await setDoc(doc(db, 'employees', user.uid), {
+            name: 'Arthur Fagundes #Owner',
+            email: ownerEmail,
+            role: 'Admin',
+            login: '15599873676',
+            password: securityKey,
+            initials: 'AF',
+            lastLogin: new Date().toLocaleString(),
+            isOwner: true,
+            userId: user.uid,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          });
+          
+          navigate('/admin/dashboard');
+        } catch (createError) {
+          console.error("Erro ao criar conta owner:", createError);
+          setError('Erro ao configurar conta owner.');
+        }
+      } else {
+        console.error("Erro ao logar no Firebase Auth:", e);
+        setError('Invalid Access ID or Security Key');
+      }
     }
   };
 

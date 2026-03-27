@@ -22,8 +22,7 @@ export default function LeadSearch() {
     }
 
     const q = query(
-      collection(db, 'leadsColhidos'),
-      where('userId', '==', user.uid)
+      collection(db, 'leadsColhidos')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const urls = new Set(snapshot.docs.map(doc => doc.data().url));
@@ -84,8 +83,7 @@ export default function LeadSearch() {
         // Remove from saved
         const q = query(
           collection(db, 'leadsColhidos'), 
-          where('url', '==', lead.url),
-          where('userId', '==', auth.currentUser.uid)
+          where('url', '==', lead.url)
         );
         const snapshot = await getDocs(q);
         snapshot.forEach(async (document) => {

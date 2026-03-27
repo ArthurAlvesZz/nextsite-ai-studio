@@ -32,7 +32,6 @@ export function useEmployees() {
 
     const q = query(
       collection(db, 'employees'),
-      where('userId', '==', user.uid),
       orderBy('name', 'asc')
     );
     

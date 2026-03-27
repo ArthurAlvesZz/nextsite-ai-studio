@@ -34,7 +34,6 @@ export function useSales() {
 
     const q = query(
       collection(db, 'sales'), 
-      where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
     

@@ -16,6 +16,12 @@ export default function ClientLogin() {
     e.preventDefault();
     setLoading(true);
     setError('');
+
+    // Test credentials bypass
+    if (accessId === '123' && securityKey === '123') {
+      navigate('/client/dashboard');
+      return;
+    }
     
     try {
       const email = `${accessId}@nextcreatives.co`;
@@ -52,15 +58,20 @@ export default function ClientLogin() {
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-secondary to-primary"></div>
           
           <div className="flex flex-col items-center mb-10">
-            <div className="w-16 h-16 mb-6 rounded-2xl overflow-hidden bg-white/[0.02] border border-white/10 flex items-center justify-center shadow-lg">
-              <img alt="Next Creatives Corporate Logo" className="w-10 h-10 object-contain" src="/logo.png" />
+            <div className="w-20 h-20 mb-6 rounded-3xl overflow-hidden bg-white/[0.02] border border-white/10 flex items-center justify-center shadow-2xl shadow-secondary/10 group">
+              <span className="material-symbols-outlined text-4xl text-secondary group-hover:scale-110 transition-transform duration-500">waves</span>
             </div>
-            <h1 className="text-3xl font-bold text-white font-headline tracking-tight text-center">
-              Portal do Cliente
+            <h1 className="text-4xl font-black tracking-[0.1em] text-center uppercase font-headline bg-gradient-to-r from-secondary to-primary bg-clip-text text-transparent">
+              River
             </h1>
-            <p className="text-white/40 text-sm mt-2 font-headline uppercase tracking-widest">
-              Acesso Restrito
+            <p className="text-xl italic text-secondary/60 font-serif mt-2 tracking-wider">
+              Portal do Cliente
             </p>
+          </div>
+
+          <div className="mb-8 text-center p-3 rounded-xl bg-secondary/10 border border-secondary/20">
+            <p className="text-xs text-secondary/80 font-medium mb-1">Credenciais de Teste:</p>
+            <p className="text-[10px] text-white/60 font-mono">ID: 123 | Key: 123</p>
           </div>
 
           <form className="space-y-8" onSubmit={handleLogin}>

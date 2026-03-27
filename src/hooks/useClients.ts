@@ -35,7 +35,6 @@ export function useClients() {
     const path = 'clients';
     const q = query(
       collection(db, path),
-      where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
     

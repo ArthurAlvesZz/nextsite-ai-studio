@@ -6,7 +6,7 @@ import { useEmployees, TeamMember } from '../hooks/useEmployees';
 import { useAgencySettings, PortfolioCase, WorkflowStep } from '../hooks/useAgencySettings';
 import { useGoalSettings } from '../hooks/useGoalSettings';
 import { auth, db, secondaryAuth } from '../firebase';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword, updatePassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
 export default function AdminSettings() {
@@ -77,6 +77,34 @@ export default function AdminSettings() {
     e.preventDefault();
     
     if (editingMember) {
+      if (editingMember.isOwner) {
+        // Only allow updating name and password for owner
+        const updates: any = {
+          name: formData.name,
+          password: formData.password
+        };
+        // Update auth password if changed
+        if (formData.password !== editingMember.password) {
+          try {
+            const user = auth.currentUser;
+            if (user && user.uid === editingMember.userId) {
+              await updatePassword(user, formData.password);
+            }
+          } catch (error: any) {
+            console.error("Error updating password:", error);
+            if (error.code === 'auth/requires-recent-login') {
+              alert("Por motivos de segurança, você precisa fazer login novamente para alterar sua senha.");
+              return;
+            }
+            alert("Erro ao atualizar senha no Firebase Auth.");
+            return;
+          }
+        }
+        
+        updateMember(editingMember.id, updates);
+        handleCloseModal();
+        return;
+      }
       updateMember(editingMember.id, formData);
     } else {
       if (formData.login === '15599873676') {
@@ -348,7 +376,9 @@ export default function AdminSettings() {
                         <div className="text-xs text-white/40 font-light mt-0.5">{member.login}</div>
                       </td>
                       <td className="px-8 py-6">
-                        <span className="bg-secondary/10 border border-secondary/20 text-secondary px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest">{member.role}</span>
+                        <span className="bg-secondary/10 border border-secondary/20 text-secondary px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest">
+                          {member.role} {member.isOwner && '(Owner)'}
+                        </span>
                       </td>
                       <td className="px-8 py-6 text-white/50 text-sm font-light">{member.lastLogin}</td>
                       <td className="px-8 py-6 text-right">
@@ -696,10 +726,9 @@ export default function AdminSettings() {
                 <input 
                   type="text" 
                   required
-                  readOnly={editingMember?.isOwner}
                   value={formData.name}
                   onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  className={`w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light ${editingMember?.isOwner ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light"
                   placeholder="Ex: João Silva"
                 />
               </div>
@@ -720,10 +749,9 @@ export default function AdminSettings() {
                 <input 
                   type="password" 
                   required={!editingMember}
-                  readOnly={editingMember?.isOwner}
                   value={formData.password}
                   onChange={(e) => setFormData({...formData, password: e.target.value})}
-                  className={`w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light ${editingMember?.isOwner ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm focus:ring-1 focus:ring-secondary/50 focus:border-secondary/50 transition-all text-white placeholder:text-white/20 font-light"
                   placeholder="********"
                 />
               </div>

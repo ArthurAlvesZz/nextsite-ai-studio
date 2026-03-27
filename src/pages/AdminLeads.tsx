@@ -40,7 +40,6 @@ export default function AdminLeads() {
 
     const q = query(
       collection(db, 'leadsColhidos'),
-      where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
