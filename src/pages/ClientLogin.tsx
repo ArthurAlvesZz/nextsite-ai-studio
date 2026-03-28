@@ -58,11 +58,16 @@ export default function ClientLogin() {
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-secondary to-primary"></div>
           
           <div className="flex flex-col items-center mb-10">
-            <div className="w-20 h-20 mb-6 rounded-3xl overflow-hidden bg-white/[0.02] border border-white/10 flex items-center justify-center shadow-2xl shadow-secondary/10 group">
-              <span className="material-symbols-outlined text-4xl text-secondary group-hover:scale-110 transition-transform duration-500">waves</span>
+            <div className="w-24 h-24 mb-6 rounded-3xl overflow-hidden bg-white/[0.02] border border-white/10 flex items-center justify-center shadow-2xl shadow-secondary/10 group p-4">
+              <img 
+                src="/logo.png" 
+                alt="Next Creatives Logo" 
+                className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500"
+                referrerPolicy="no-referrer"
+              />
             </div>
-            <h1 className="text-4xl font-black tracking-[0.1em] text-center uppercase font-headline bg-gradient-to-r from-secondary to-primary bg-clip-text text-transparent">
-              River
+            <h1 className="text-3xl font-black tracking-[0.1em] text-center uppercase font-headline bg-gradient-to-r from-secondary to-primary bg-clip-text text-transparent">
+              Next Creatives Studio
             </h1>
             <p className="text-xl italic text-secondary/60 font-serif mt-2 tracking-wider">
               Portal do Cliente

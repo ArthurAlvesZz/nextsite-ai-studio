@@ -7,7 +7,7 @@ interface ClientSidebarProps {
 
 export default function ClientSidebar({ activePage }: ClientSidebarProps) {
   return (
-    <aside className="h-screen w-64 fixed left-0 top-0 overflow-y-auto bg-[#050505] border-r border-white/5 flex flex-col py-10 px-8 gap-12 z-50">
+    <aside className="h-screen w-64 fixed left-0 top-0 bg-[#050505] border-r border-white/5 flex flex-col py-10 px-8 gap-12 z-50">
       <div className="flex flex-col gap-1 px-2">
         <div className="flex items-center gap-3 mb-4">
           <img 
@@ -73,21 +73,6 @@ export default function ClientSidebar({ activePage }: ClientSidebarProps) {
         </Link>
       </nav>
 
-      <div className="mt-auto pt-8 border-t border-white/5">
-        <div className="bg-gradient-to-br from-secondary/10 to-primary/10 p-5 rounded-[1.5rem] border border-white/5 relative overflow-hidden group">
-          <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-700">
-            <span className="material-symbols-outlined text-5xl text-secondary">auto_awesome</span>
-          </div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-secondary mb-2">Novo Projeto?</p>
-          <p className="text-[11px] text-white/60 leading-relaxed font-light mb-4">Inicie uma nova produção agora mesmo.</p>
-          <button 
-            onClick={() => window.open('https://wa.me/5511999999999?text=Olá! Gostaria de iniciar um novo projeto.', '_blank')}
-            className="w-full py-2.5 bg-white text-black rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-secondary hover:text-white transition-all"
-          >
-            Começar
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }

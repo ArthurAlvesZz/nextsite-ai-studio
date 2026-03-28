@@ -78,7 +78,7 @@ export default function ClientDashboard() {
         });
 
         // Active projects (latest 2)
-        setActiveProjects(sortedDemands.slice(0, 2));
+        setActiveProjects(sortedDemands.slice(0, 1));
 
         // Finished projects for history (latest 5)
         const finished = sortedDemands.filter(p => p.status === 'Finalizado');
@@ -246,7 +246,10 @@ export default function ClientDashboard() {
                   <span className="text-xl font-bold font-headline tracking-tight">Ativa & Verificada</span>
                 </div>
               </div>
-              <button className="mt-12 w-full py-4 bg-white text-black rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] hover:bg-secondary hover:text-white transition-all shadow-xl shadow-white/5">
+              <button 
+                onClick={() => window.open('https://wa.me/5511999999999', '_blank')}
+                className="mt-12 w-full py-4 bg-white text-black rounded-2xl text-[10px] font-bold uppercase tracking-[0.2em] hover:bg-secondary hover:text-white transition-all shadow-xl shadow-white/5"
+              >
                 Falar com Suporte
               </button>
             </motion.div>
@@ -313,9 +316,13 @@ export default function ClientDashboard() {
                       </div>
                       
                       {project.status === 'Finalizado' ? (
-                        <button className="w-full bg-white text-black hover:bg-secondary hover:text-white font-black py-5 rounded-2xl transition-all duration-500 text-[10px] uppercase tracking-[0.3em] shadow-2xl shadow-black flex items-center justify-center gap-3">
+                        <button 
+                          onClick={() => project.videoUrl && window.open(project.videoUrl, '_blank')}
+                          className={`w-full bg-white text-black hover:bg-secondary hover:text-white font-black py-5 rounded-2xl transition-all duration-500 text-[10px] uppercase tracking-[0.3em] shadow-2xl shadow-black flex items-center justify-center gap-3 ${!project.videoUrl ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          disabled={!project.videoUrl}
+                        >
                           <span className="material-symbols-outlined text-lg">download</span>
-                          Download Master 4K
+                          {project.videoUrl ? 'Download Master 4K' : 'Link não disponível'}
                         </button>
                       ) : (
                         <div className="w-full bg-white/5 border border-white/5 text-white/20 font-bold py-5 rounded-2xl flex items-center justify-center gap-3 text-[10px] uppercase tracking-[0.2em]">
@@ -378,7 +385,11 @@ export default function ClientDashboard() {
                           <span className="text-[9px] font-black uppercase tracking-[0.2em] text-tertiary bg-tertiary/10 px-4 py-1.5 rounded-full border border-tertiary/20">Disponível</span>
                         </td>
                         <td className="px-10 py-8 text-right">
-                          <button className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white hover:text-black transition-all duration-500 flex items-center justify-center border border-white/5">
+                          <button 
+                            onClick={() => project.videoUrl && window.open(project.videoUrl, '_blank')}
+                            className={`w-10 h-10 rounded-xl bg-white/5 hover:bg-white hover:text-black transition-all duration-500 flex items-center justify-center border border-white/5 ${!project.videoUrl ? 'opacity-30 cursor-not-allowed' : ''}`}
+                            disabled={!project.videoUrl}
+                          >
                             <span className="material-symbols-outlined text-sm">download</span>
                           </button>
                         </td>

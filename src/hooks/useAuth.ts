@@ -10,6 +10,11 @@ export interface AdminProfile {
   avatarUrl: string;
   role?: 'admin' | 'editor';
   password?: string;
+  email?: string;
+  googleLinked?: boolean;
+  googleEmail?: string;
+  googleUid?: string;
+  userId?: string;
 }
 
 export function useAuth() {
@@ -64,7 +69,9 @@ export function useAuth() {
           name: isMaster ? 'Arthur Fagundes #Owner' : (user.displayName || 'Usuário'),
           phone: isMaster ? '15599873676' : (user.phoneNumber || ''),
           avatarUrl: user.photoURL || '',
-          role: isMaster ? 'admin' : 'editor'
+          role: isMaster ? 'admin' : 'editor',
+          email: user.email || '',
+          userId: user.uid
         };
         setAdminProfile(defaultProfile);
 

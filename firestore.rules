@@ -80,17 +80,31 @@ service cloud.firestore {
 
     match /clients/{clientId} {
       // Admins and editors can read and write clients
-      allow read, write: if isAdminOrEditor();
+      // Clients can read their own document
+      allow read: if isAdminOrEditor() || (isAuthenticated() && (resource.data.accessId == request.auth.token.email.split('@')[0] || clientId == request.auth.uid));
+      allow write: if isAdminOrEditor();
     }
 
     match /sales/{saleId} {
       // Admins and editors can read and write sales
-      allow read, write: if isAdminOrEditor();
+      // Clients can read their own sales
+      allow read: if isAdminOrEditor() || (isAuthenticated() && resource.data.clientId == request.auth.uid);
+      allow write: if isAdminOrEditor();
     }
 
     match /demands/{demandId} {
       // Admins and editors can read and write demands
-      allow read, write: if isAdminOrEditor();
+      // Clients can read their own demands
+      allow read: if isAdminOrEditor() || (isAuthenticated() && resource.data.clientId == request.auth.uid);
+      allow write: if isAdminOrEditor();
+    }
+
+    match /notifications/{notificationId} {
+      // Clients can read and update their own notifications
+      // Admins can read and write all
+      allow read: if isAdminOrEditor() || (isAuthenticated() && resource.data.clientId == request.auth.uid);
+      allow update: if isAuthenticated() && resource.data.clientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if isAdminOrEditor();
     }
 
     match /employees/{employeeId} {

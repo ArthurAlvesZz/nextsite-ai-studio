@@ -2,14 +2,65 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { doc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 export default function AdminLogin() {
   const [accessId, setAccessId] = useState('');
   const [securityKey, setSecurityKey] = useState('');
   const [error, setError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const navigate = useNavigate();
+
+  const handleGoogleLogin = async () => {
+    setIsLoggingIn(true);
+    setError('');
+    const provider = new GoogleAuthProvider();
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      // Check if this Google account is linked to any user in our database
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('googleUid', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        // User found, proceed to dashboard
+        navigate('/admin/dashboard');
+      } else {
+        // Check if email matches any user in 'users' or 'employees'
+        const qEmail = query(usersRef, where('email', '==', user.email));
+        const emailSnapshot = await getDocs(qEmail);
+        
+        const empRef = collection(db, 'employees');
+        const qEmp = query(empRef, where('email', '==', user.email));
+        const empSnapshot = await getDocs(qEmp);
+
+        if (!emailSnapshot.empty || !empSnapshot.empty) {
+          // Email matches! Link it.
+          const userId = !emailSnapshot.empty ? emailSnapshot.docs[0].id : empSnapshot.docs[0].id;
+          
+          await setDoc(doc(db, 'users', userId), {
+            googleLinked: true,
+            googleUid: user.uid,
+            googleEmail: user.email
+          }, { merge: true });
+          
+          navigate('/admin/dashboard');
+        } else {
+          // No user found with this Google account or email
+          setError('Esta conta Google não está vinculada a nenhum perfil administrativo.');
+          await auth.signOut();
+        }
+      }
+    } catch (e: any) {
+      console.error("Erro ao logar com Google:", e);
+      setError('Erro na autenticação com Google.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,14 +215,32 @@ export default function AdminLogin() {
 
             {/* CTA Button */}
             <button 
-              className="w-full relative group overflow-hidden rounded-xl py-4 bg-gradient-to-r from-secondary to-primary transition-all duration-500 hover:scale-[1.02] active:scale-95 shadow-[0_0_30px_rgba(233,179,255,0.2)] hover:shadow-[0_0_40px_rgba(233,179,255,0.4)]" 
+              className="w-full relative group overflow-hidden rounded-xl py-4 bg-gradient-to-r from-secondary to-primary transition-all duration-500 hover:scale-[1.02] active:scale-95 shadow-[0_0_30px_rgba(233,179,255,0.2)] hover:shadow-[0_0_40px_rgba(233,179,255,0.4)] disabled:opacity-50" 
               type="submit"
+              disabled={isLoggingIn}
             >
               <span className="relative z-10 text-on-secondary font-headline font-bold uppercase text-sm tracking-widest flex items-center justify-center gap-3">
-                Enter Dashboard
+                {isLoggingIn ? 'Processing...' : 'Enter Dashboard'}
                 <span className="material-symbols-outlined text-lg group-hover:translate-x-1 transition-transform">arrow_forward</span>
               </span>
               <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
+            </button>
+
+            <div className="relative flex items-center justify-center py-2">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10"></div>
+              </div>
+              <span className="relative px-4 bg-[#0a0a0a] text-[10px] uppercase tracking-[0.3em] text-white/30">OU</span>
+            </div>
+
+            <button 
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={isLoggingIn}
+              className="w-full flex items-center justify-center gap-3 py-4 bg-white/[0.03] border border-white/10 rounded-xl text-white hover:bg-white/5 transition-all disabled:opacity-50"
+            >
+              <img src="https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png" alt="Google" className="h-4 object-contain" />
+              <span className="font-headline font-bold uppercase text-[10px] tracking-widest">Entrar com Google</span>
             </button>
           </form>
         </div>

@@ -16,6 +16,7 @@ import ClientDashboard from './pages/ClientDashboard';
 import ClientProjects from './pages/ClientProjects';
 import ClientPurchases from './pages/ClientPurchases';
 import ClientSettings from './pages/ClientSettings';
+import AdminProfile from './pages/AdminProfile';
 import ProtectedRoute from './components/ProtectedRoute';
 import { motion, useScroll, useTransform, AnimatePresence } from 'motion/react';
 import { useAgencySettings } from './hooks/useAgencySettings';
@@ -1377,6 +1378,7 @@ export default function App() {
           {/* Protected Admin Routes */}
           <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/profile" element={<ProtectedRoute><AdminProfile /></ProtectedRoute>} />
           <Route path="/admin/clients" element={<ProtectedRoute><AdminClients /></ProtectedRoute>} />
           <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />
           <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />

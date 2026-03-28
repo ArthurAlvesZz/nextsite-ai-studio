@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from '../firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, updateDoc, doc } from 'firebase/firestore';
 
 interface ClientTopbarProps {
   title?: string;
@@ -11,8 +11,11 @@ interface ClientTopbarProps {
 
 export default function ClientTopbar({ title = "Área do Cliente", subtitle = "Bem-vindo de volta 👋" }: ClientTopbarProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [clientData, setClientData] = useState<any>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const notificationsRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -35,6 +38,9 @@ export default function ClientTopbar({ title = "Área do Cliente", subtitle = "B
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsDropdownOpen(false);
       }
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
@@ -43,10 +49,42 @@ export default function ClientTopbar({ title = "Área do Cliente", subtitle = "B
     };
   }, []);
 
+  useEffect(() => {
+    if (clientData?.id) {
+      const q = query(
+        collection(db, 'notifications'),
+        where('clientId', '==', clientData.id),
+        orderBy('createdAt', 'desc'),
+        limit(10)
+      );
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const notifs = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setNotifications(notifs);
+      });
+
+      return () => unsubscribe();
+    }
+  }, [clientData?.id]);
+
   const handleLogout = async () => {
     await auth.signOut();
     navigate('/client/login');
   };
+
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+      const notifRef = doc(db, 'notifications', notificationId);
+      await updateDoc(notifRef, { read: true });
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+    }
+  };
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const userInitials = clientData?.name 
     ? clientData.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -59,18 +97,87 @@ export default function ClientTopbar({ title = "Área do Cliente", subtitle = "B
         <p className="text-[10px] text-white/30 font-bold uppercase tracking-[0.2em] mt-1">{subtitle}</p>
       </div>
       <div className="flex items-center gap-8">
-        <div className="hidden lg:flex items-center gap-10">
-          <Link to="/client/dashboard" className="text-secondary text-[10px] font-bold uppercase tracking-[0.2em] relative after:absolute after:bottom-[-4px] after:left-0 after:w-full after:h-[2px] after:bg-secondary">Visão Geral</Link>
-          <button onClick={() => navigate('/client/settings')} className="text-white/30 hover:text-white text-[10px] font-bold uppercase tracking-[0.2em] transition-colors">Notificações</button>
-        </div>
         <div className="flex items-center gap-6">
-          <button 
-            onClick={() => navigate('/client/settings')}
-            className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/40 hover:text-white transition-all relative"
-          >
-            <span className="material-symbols-outlined text-xl">notifications</span>
-            <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-secondary rounded-full border-2 border-[#050505]"></span>
-          </button>
+          <div className="relative" ref={notificationsRef}>
+            <button 
+              onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+              className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all relative ${
+                isNotificationsOpen ? 'bg-secondary text-white border-secondary' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'
+              }`}
+            >
+              <span className="material-symbols-outlined text-xl">notifications</span>
+              {unreadCount > 0 && (
+                <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-secondary rounded-full border-2 border-[#050505]"></span>
+              )}
+            </button>
+
+            <AnimatePresence>
+              {isNotificationsOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                  className="absolute top-full right-0 mt-4 w-80 bg-[#0a0a0a] border border-white/10 rounded-3xl shadow-2xl overflow-hidden z-50"
+                >
+                  <div className="p-6 border-b border-white/5 bg-white/[0.02] flex justify-between items-center">
+                    <p className="text-xs font-bold text-white uppercase tracking-widest">Notificações</p>
+                    {unreadCount > 0 && (
+                      <span className="text-[9px] bg-secondary/20 text-secondary px-2 py-0.5 rounded-full font-bold uppercase tracking-widest">
+                        {unreadCount} Novas
+                      </span>
+                    )}
+                  </div>
+                  <div className="max-h-96 overflow-y-auto custom-scrollbar">
+                    {notifications.length > 0 ? (
+                      notifications.map((notif) => (
+                        <div 
+                          key={notif.id}
+                          onClick={() => handleMarkAsRead(notif.id)}
+                          className={`p-5 border-b border-white/5 hover:bg-white/[0.02] transition-colors cursor-pointer relative ${!notif.read ? 'bg-secondary/[0.02]' : ''}`}
+                        >
+                          {!notif.read && (
+                            <div className="absolute top-6 left-2 w-1 h-1 bg-secondary rounded-full"></div>
+                          )}
+                          <div className="flex gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                              notif.type === 'video_ready' ? 'bg-emerald-400/10 text-emerald-400' : 'bg-primary/10 text-primary'
+                            }`}>
+                              <span className="material-symbols-outlined text-sm">
+                                {notif.type === 'video_ready' ? 'movie' : 'info'}
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              <p className={`text-[11px] font-bold uppercase tracking-widest ${!notif.read ? 'text-white' : 'text-white/60'}`}>
+                                {notif.title}
+                              </p>
+                              <p className="text-[10px] text-white/30 leading-relaxed">
+                                {notif.message}
+                              </p>
+                              <p className="text-[8px] text-white/10 font-bold uppercase tracking-widest pt-1">
+                                {new Date(notif.createdAt).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-10 text-center">
+                        <span className="material-symbols-outlined text-white/5 text-4xl mb-2">notifications_off</span>
+                        <p className="text-[10px] text-white/20 uppercase tracking-widest font-bold">Nenhuma notificação</p>
+                      </div>
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => navigate('/client/settings')}
+                    className="w-full p-4 text-[9px] font-bold text-white/20 hover:text-white uppercase tracking-widest transition-colors bg-white/[0.01]"
+                  >
+                    Ver todas as configurações
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="flex items-center gap-4 pl-8 border-l border-white/5 relative" ref={dropdownRef}>
             <div className="text-right hidden sm:block">
               <p className="text-[11px] font-bold text-white uppercase tracking-widest">{clientData?.company || 'Next Client'}</p>

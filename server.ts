@@ -6,6 +6,9 @@ import dotenv from "dotenv";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, getDocs, addDoc, query, orderBy, limit } from "firebase/firestore";
 import fs from "fs";
+import QRCode from "qrcode";
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
+import pino from "pino";
 
 dotenv.config();
 
@@ -33,6 +36,84 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // WhatsApp Client State
+  let whatsappSocket: any = null;
+  let whatsappQR: string | null = null;
+  let whatsappStatus: 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready' = 'disconnected';
+
+  const initializeWhatsApp = async () => {
+    if (whatsappSocket) return;
+
+    whatsappStatus = 'connecting';
+    const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '.baileys_auth'));
+
+    whatsappSocket = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      logger: pino({ level: 'silent' })
+    });
+
+    whatsappSocket.ev.on('connection.update', async (update: any) => {
+      const { connection, lastDisconnect, qr } = update;
+      
+      if (qr) {
+        console.log('WhatsApp QR Received');
+        whatsappQR = await QRCode.toDataURL(qr);
+        whatsappStatus = 'qr';
+      }
+
+      if (connection === 'close') {
+        const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
+        console.log('WhatsApp Connection closed. Reconnecting:', shouldReconnect);
+        whatsappStatus = 'disconnected';
+        whatsappSocket = null;
+        whatsappQR = null;
+        if (shouldReconnect) {
+          initializeWhatsApp();
+        }
+      } else if (connection === 'open') {
+        console.log('WhatsApp Ready');
+        whatsappStatus = 'ready';
+        whatsappQR = null;
+      }
+    });
+
+    whatsappSocket.ev.on('creds.update', saveCreds);
+
+    whatsappSocket.ev.on('messages.upsert', (m: any) => {
+      if (m.type === 'notify') {
+        for (const msg of m.messages) {
+          console.log(`WhatsApp Message Received from ${msg.key.remoteJid}: ${msg.message?.conversation || msg.message?.extendedTextMessage?.text || 'Media/Other'}`);
+        }
+      }
+    });
+  };
+
+  app.get("/api/whatsapp/status", (req, res) => {
+    res.json({ status: whatsappStatus, qr: whatsappQR });
+  });
+
+  app.post("/api/whatsapp/connect", async (req, res) => {
+    if (whatsappStatus === 'disconnected') {
+      await initializeWhatsApp();
+    }
+    res.json({ status: whatsappStatus, qr: whatsappQR });
+  });
+
+  app.post("/api/whatsapp/logout", async (req, res) => {
+    if (whatsappSocket) {
+      try {
+        await whatsappSocket.logout();
+      } catch (e) {
+        console.error("Error during WhatsApp logout:", e);
+      }
+      whatsappSocket = null;
+      whatsappStatus = 'disconnected';
+      whatsappQR = null;
+    }
+    res.json({ success: true });
+  });
 
   // API Route: Buscar Leads (New Architecture)
   app.post("/api/leads/search", async (req, res) => {

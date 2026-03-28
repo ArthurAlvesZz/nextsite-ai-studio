@@ -16,6 +16,8 @@ export default function AdminVideos() {
   const [selectedVideo, setSelectedVideo] = useState<VideoDemand | null>(null);
   const [isNewDemandModalOpen, setIsNewDemandModalOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
+  const [finalizeVideoUrl, setFinalizeVideoUrl] = useState('');
   const [pendingMove, setPendingMove] = useState<{ id: string, status: string } | null>(null);
   const [focusedDemands, setFocusedDemands] = useState<Record<string, string | null>>({});
   const [selectedSaleId, setSelectedSaleId] = useState('');
@@ -95,6 +97,13 @@ export default function AdminVideos() {
 
     const updates: Partial<VideoDemand> = { status: newStatus };
     
+    // Trigger finalize modal if moving to 'Finalizado'
+    if (newStatus === 'Finalizado') {
+      setPendingMove({ id, status: newStatus });
+      setIsFinalizeModalOpen(true);
+      return;
+    }
+
     // Increment revision count if moving from Revisão back to Em Produção
     if (demand?.status === 'Revisão' && newStatus === 'Em Produção') {
       updates.revisionCount = (demand.revisionCount || 0) + 1;
@@ -150,6 +159,23 @@ export default function AdminVideos() {
       });
       setIsEmployeeModalOpen(false);
       setPendingMove(null);
+    }
+  };
+
+  const handleFinalizeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingMove) return;
+
+    updateDemand(pendingMove.id, { 
+      status: 'Finalizado' as any,
+      videoUrl: finalizeVideoUrl
+    });
+
+    setIsFinalizeModalOpen(false);
+    setFinalizeVideoUrl('');
+    setPendingMove(null);
+    if (selectedVideo?.id === pendingMove.id) {
+      setSelectedVideo(prev => prev ? { ...prev, status: 'Finalizado', videoUrl: finalizeVideoUrl } : null);
     }
   };
 
@@ -610,6 +636,55 @@ export default function AdminVideos() {
                     className="w-full bg-gradient-to-r from-secondary to-primary text-white py-5 rounded-2xl font-bold uppercase tracking-widest text-xs hover:shadow-[0_0_30px_rgba(203,123,255,0.4)] transition-all active:scale-[0.98]"
                   >
                     Criar Demanda
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Finalize Video Modal */}
+      <AnimatePresence>
+        {isFinalizeModalOpen && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 bg-black/90 backdrop-blur-2xl">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="w-full max-w-md bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl"
+            >
+              <div className="p-8 border-b border-white/10 bg-gradient-to-r from-emerald-400/10 to-transparent">
+                <h2 className="text-xl font-headline font-bold text-white tracking-tight">Finalizar <span className="font-serif italic text-emerald-400 font-light">Vídeo</span></h2>
+                <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold mt-2">Insira o link para o cliente baixar o arquivo</p>
+              </div>
+
+              <form onSubmit={handleFinalizeSubmit} className="p-8 space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold ml-1">Link do Vídeo Final</label>
+                  <input 
+                    required
+                    type="url"
+                    placeholder="https://drive.google.com/..."
+                    value={finalizeVideoUrl}
+                    onChange={(e) => setFinalizeVideoUrl(e.target.value)}
+                    className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-4 px-5 text-sm focus:ring-1 focus:ring-emerald-400/50 focus:border-emerald-400/50 transition-all text-white outline-none"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => { setIsFinalizeModalOpen(false); setPendingMove(null); setFinalizeVideoUrl(''); }}
+                    className="flex-1 py-4 text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 bg-emerald-400 text-black py-4 rounded-2xl font-bold uppercase tracking-widest text-[10px] hover:shadow-[0_0_20px_rgba(52,211,153,0.4)] transition-all"
+                  >
+                    Finalizar Agora
                   </button>
                 </div>
               </form>

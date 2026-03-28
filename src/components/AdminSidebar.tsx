@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
 
-import { useAuth } from '../hooks/useAuth';
-
 interface AdminSidebarProps {
-  activePage: 'dashboard' | 'vendas' | 'clientes' | 'videos' | 'tools' | 'settings' | 'team';
+  activePage: 'dashboard' | 'vendas' | 'clientes' | 'videos' | 'tools' | 'settings' | 'team' | 'profile';
 }
 
 export default function AdminSidebar({ activePage }: AdminSidebarProps) {
-  const [showLogout, setShowLogout] = useState(false);
   const navigate = useNavigate();
   const { adminProfile } = useAuth();
+  const [showLogout, setShowLogout] = useState(false);
 
   const handleLogout = () => {
     navigate('/admin');
@@ -20,14 +19,17 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
   return (
     <aside className="h-screen w-64 fixed left-0 top-0 border-r border-white/10 bg-white/[0.02] backdrop-blur-2xl flex flex-col py-8 z-50">
       <div className="px-8 mb-12 flex flex-col items-start gap-4">
-        <img 
-          className="h-8 object-contain logo-transparent" 
-          alt="Next Creatives Logo" 
-          src="/logo.png"
-          referrerPolicy="no-referrer"
-        />
-        <div>
-          <p className="font-serif italic text-sm tracking-[0.15em] text-secondary/90 mt-1">Admin Terminal</p>
+        <div className="flex items-center gap-4">
+          <img 
+            className="h-8 object-contain logo-transparent" 
+            alt="Next Creatives Logo" 
+            src="/logo.png"
+            referrerPolicy="no-referrer"
+          />
+        </div>
+        <div className="flex flex-col gap-1 ml-1">
+          <span className="text-[16px] font-serif italic text-secondary tracking-[0.15em] leading-none">Painel Admin</span>
+          <div className="h-[1px] w-12 bg-gradient-to-r from-secondary/50 to-transparent"></div>
         </div>
       </div>
       <nav className="flex-1 px-4 space-y-2">
@@ -98,58 +100,64 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
           <span className="material-symbols-outlined text-lg">settings</span>
           <span className="font-headline font-bold text-xs uppercase tracking-widest">Ajustes</span>
         </Link>
-      </nav>
-      <div className="px-6 mt-auto relative">
-        <AnimatePresence>
-          {showLogout && (
-            <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-              className="absolute bottom-full left-6 right-6 mb-2 bg-[#0e0e0e] border border-white/10 rounded-xl p-2 shadow-2xl z-50 backdrop-blur-xl"
-            >
-              <div className="flex flex-col gap-1">
-                <Link
-                  to="/admin/team/1"
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-white/70 hover:text-white hover:bg-white/5 transition-all group"
+
+        <div className="h-px bg-white/5 my-4 mx-6"></div>
+
+        <div className="relative mt-auto pt-4">
+          <AnimatePresence>
+            {showLogout && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                className="absolute bottom-full left-0 w-full mb-2 p-2 bg-[#1A1A1A] border border-white/10 rounded-2xl shadow-2xl backdrop-blur-xl z-[60]"
+              >
+                <Link 
+                  to="/admin/profile"
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/70 hover:text-white hover:bg-white/5 transition-colors"
+                  onClick={() => setShowLogout(false)}
                 >
-                  <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform">person</span>
+                  <span className="material-symbols-outlined text-lg">person</span>
                   <span className="font-headline font-bold text-[10px] uppercase tracking-widest">Meu Perfil</span>
                 </Link>
-                <div className="h-px w-full bg-white/10 my-1"></div>
-                <button
+                <button 
                   onClick={handleLogout}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-red-400 hover:bg-red-500/10 transition-all group"
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400/70 hover:text-red-400 hover:bg-red-400/5 transition-colors"
                 >
-                  <span className="material-symbols-outlined text-lg group-hover:rotate-12 transition-transform">logout</span>
+                  <span className="material-symbols-outlined text-lg">logout</span>
                   <span className="font-headline font-bold text-[10px] uppercase tracking-widest">Sair da Conta</span>
                 </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div 
-          onClick={() => setShowLogout(!showLogout)}
-          className={`bg-white/[0.02] border border-white/10 p-4 rounded-xl flex items-center gap-3 cursor-pointer transition-all hover:bg-white/[0.05] ${showLogout ? 'border-secondary/50 ring-1 ring-secondary/20' : ''}`}
-        >
-          <div className="relative">
-            {adminProfile.avatarUrl ? (
-              <img src={adminProfile.avatarUrl} alt="Profile" className="h-10 w-10 rounded-full object-cover border border-white/10 shadow-lg" />
-            ) : (
-              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-secondary to-primary flex items-center justify-center font-headline font-bold text-on-secondary text-sm shadow-lg">
-                {adminProfile.name ? adminProfile.name.substring(0, 2).toUpperCase() : 'AD'}
-              </div>
+              </motion.div>
             )}
-            <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#0e0e0e] rounded-full"></span>
-          </div>
-          <div className="overflow-hidden flex-1">
-            <p className="text-sm font-headline font-bold text-white truncate">{adminProfile.name || 'Usuário'}</p>
-            <p className="text-[10px] uppercase tracking-widest text-secondary/70 truncate mt-0.5">{adminProfile.role === 'admin' ? 'Administrador' : 'Editor'}</p>
-          </div>
-          <span className={`material-symbols-outlined text-white/20 transition-transform duration-300 ${showLogout ? 'rotate-180' : ''}`}>expand_less</span>
+          </AnimatePresence>
+
+          <button 
+            onClick={() => setShowLogout(!showLogout)}
+            className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all duration-300 border ${
+              showLogout ? 'bg-white/10 border-white/20' : 'bg-white/[0.03] border-white/5 hover:bg-white/5 hover:border-white/10'
+            }`}
+          >
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-secondary/20 to-primary/20 border border-white/10 flex items-center justify-center overflow-hidden flex-shrink-0">
+              {adminProfile.avatarUrl ? (
+                <img src={adminProfile.avatarUrl} alt={adminProfile.name} className="h-full w-full object-cover" />
+              ) : (
+                <span className="material-symbols-outlined text-secondary/60">person</span>
+              )}
+            </div>
+            <div className="flex-1 text-left min-w-0">
+              <div className="text-[11px] font-headline font-bold text-white truncate uppercase tracking-tight">
+                {adminProfile.name}
+              </div>
+              <div className="text-[9px] text-white/40 font-medium uppercase tracking-widest">
+                {adminProfile.role === 'admin' ? 'Administrador' : 'Editor'}
+              </div>
+            </div>
+            <span className={`material-symbols-outlined text-white/20 transition-transform duration-300 ${showLogout ? 'rotate-180' : ''}`}>
+              expand_less
+            </span>
+          </button>
         </div>
-      </div>
+      </nav>
     </aside>
   );
 }

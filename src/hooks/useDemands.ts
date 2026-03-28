@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy, where, getDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { useAuth } from './useAuth';
@@ -24,6 +24,7 @@ export interface VideoDemand {
   finishedAt?: string;
   revisionCount?: number;
   userId?: string;
+  videoUrl?: string;
 }
 
 export function useDemands() {
@@ -80,8 +81,50 @@ export function useDemands() {
       const currentDemand = demands.find(d => d.id === id);
       
       const updatedData = { ...updates };
-      if (updates.status === 'Finalizado' && currentDemand?.status !== 'Finalizado') {
-        updatedData.finishedAt = new Date().toISOString();
+      if (updates.status && updates.status !== currentDemand?.status) {
+        if (updates.status === 'Finalizado') {
+          updatedData.finishedAt = new Date().toISOString();
+        }
+
+        // Trigger notification for the client
+        if (currentDemand?.clientId) {
+          const clientRef = doc(db, 'clients', currentDemand.clientId);
+          const clientSnap = await getDoc(clientRef);
+          
+          if (clientSnap.exists()) {
+            const clientData = clientSnap.data();
+            const prefs = clientData.preferences?.notifications || { videosReady: true, projectUpdates: true };
+            
+            let shouldNotify = false;
+            let title = '';
+            let message = '';
+            let type = '';
+
+            if (updates.status === 'Finalizado' && prefs.videosReady) {
+              shouldNotify = true;
+              title = 'Vídeo Finalizado! 🎉';
+              message = `Seu vídeo "${currentDemand.title}" foi finalizado e está pronto para você!`;
+              type = 'video_ready';
+            } else if (updates.status !== 'Finalizado' && prefs.projectUpdates) {
+              shouldNotify = true;
+              title = 'Atualização no Projeto 🚀';
+              message = `O status do seu vídeo "${currentDemand.title}" foi alterado para: ${updates.status}.`;
+              type = 'project_update';
+            }
+
+            if (shouldNotify) {
+              await addDoc(collection(db, 'notifications'), {
+                clientId: currentDemand.clientId,
+                title,
+                message,
+                type,
+                createdAt: new Date().toISOString(),
+                read: false,
+                demandId: id
+              });
+            }
+          }
+        }
       }
       
       await updateDoc(demandRef, updatedData);
