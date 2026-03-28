@@ -1,3 +1,5 @@
+export type LeadStatus = 'novo' | 'contatado' | 'negociacao' | 'fechado';
+
 export interface LeadColhido {
   id?: string;
   url: string;
@@ -13,6 +15,7 @@ export interface LeadColhido {
   capitalSocial: number | null;
   logo: string | null;
   abordagemWhatsApp: string | null;
+  status: LeadStatus;
   createdAt: any; // Timestamp
   createdBy: string;
   updatedBy?: string;

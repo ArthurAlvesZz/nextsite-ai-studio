@@ -7,9 +7,8 @@ import AdminClients from './pages/AdminClients';
 import AdminVideos from './pages/AdminVideos';
 import AdminSales from './pages/AdminSales';
 import AdminTools from './pages/AdminTools';
+import AdminNextZap from './pages/AdminNextZap';
 import AdminSoraRemover from './pages/AdminSoraRemover';
-import LeadSearch from './pages/LeadSearch';
-import AdminLeads from './pages/AdminLeads';
 import EmployeeProfile from './pages/EmployeeProfile';
 import ClientLogin from './pages/ClientLogin';
 import ClientDashboard from './pages/ClientDashboard';
@@ -1383,9 +1382,8 @@ export default function App() {
           <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />
           <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />
           <Route path="/admin/tools" element={<ProtectedRoute><AdminTools /></ProtectedRoute>} />
+          <Route path="/admin/nextzap" element={<ProtectedRoute><AdminNextZap /></ProtectedRoute>} />
           <Route path="/admin/sora-remover" element={<ProtectedRoute><AdminSoraRemover /></ProtectedRoute>} />
-          <Route path="/admin/leads" element={<ProtectedRoute><AdminLeads /></ProtectedRoute>} />
-          <Route path="/admin/leads/search" element={<ProtectedRoute><LeadSearch /></ProtectedRoute>} />
           <Route path="/admin/team/:id" element={<ProtectedRoute><EmployeeProfile /></ProtectedRoute>} />
         </Routes>
       </PresenceProvider>

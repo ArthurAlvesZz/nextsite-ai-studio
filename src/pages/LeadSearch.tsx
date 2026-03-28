@@ -93,6 +93,7 @@ export default function LeadSearch() {
         // Add to saved
         await addDoc(collection(db, 'leadsColhidos'), {
           ...lead,
+          status: 'novo',
           userId: auth.currentUser.uid,
           createdAt: new Date().toISOString()
         });
@@ -104,7 +105,7 @@ export default function LeadSearch() {
 
   return (
     <div className="font-body text-on-background min-h-screen flex bg-[#050505] overflow-hidden">
-      <AdminSidebar activePage="tools" />
+      <AdminSidebar activePage="dashboard" />
       
       <main className="flex-1 ml-64 p-8 h-screen overflow-y-auto relative z-10">
         <div className="max-w-7xl mx-auto space-y-8">

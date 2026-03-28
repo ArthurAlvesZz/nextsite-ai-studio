@@ -15,7 +15,7 @@ export default function AdminTools() {
     },
     {
       title: 'Manual de Vendas',
-      description: 'Scripts de prospecção, fluxos do CRM e guias de fechamento comercial.',
+      description: 'Scripts de prospecção, fluxos de vendas e guias de fechamento comercial.',
       icon: 'auto_awesome_motion',
       color: 'from-primary/20 to-primary/40',
       textColor: 'text-primary',
@@ -33,9 +33,7 @@ export default function AdminTools() {
 
   const tools = [
     { name: 'Remove WaterMark Sora 2', icon: 'water_drop', color: 'text-secondary', link: '/admin/sora-remover' },
-    { name: 'Editor Cloud', icon: 'cloud_done', color: 'text-primary' },
-    { name: 'Motor de Leads', icon: 'radar', color: 'text-secondary', link: '/admin/leads/search' },
-    { name: 'Leads Salvos', icon: 'person_search', color: 'text-white', link: '/admin/leads' },
+    { name: 'NextZap CRM', icon: 'chat', color: 'text-[#00a884]', link: '/admin/nextzap' },
     { name: 'Asset Library', icon: 'folder_special', color: 'text-white' },
     { name: 'Color Palettes', icon: 'palette', color: 'text-secondary/70' }
   ];

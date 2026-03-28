@@ -88,7 +88,6 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
           <span className="material-symbols-outlined text-lg">construction</span>
           <span className="font-headline font-bold text-xs uppercase tracking-widest">Ferramentas</span>
         </Link>
-
         <Link 
           to="/admin/settings" 
           className={`flex items-center gap-3 px-4 py-3 rounded-xl mx-2 transition-all ${

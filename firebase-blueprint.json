@@ -69,6 +69,7 @@
         "capitalSocial": { "type": "number" },
         "logo": { "type": "string" },
         "abordagemWhatsApp": { "type": "string" },
+        "status": { "type": "string", "enum": ["novo", "contatado", "negociacao", "fechado"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "createdBy": { "type": "string" },
         "updatedBy": { "type": "string" }

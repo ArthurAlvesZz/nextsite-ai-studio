@@ -7,13 +7,23 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, collection, getDocs, addDoc, query, orderBy, limit } from "firebase/firestore";
 import fs from "fs";
 import QRCode from "qrcode";
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from "@whiskeysockets/baileys";
 import pino from "pino";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Baileys Store
+const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+const storePath = path.join(__dirname, '.baileys_store.json');
+if (fs.existsSync(storePath)) {
+  store.readFromFile(storePath);
+}
+setInterval(() => {
+  store.writeToFile(storePath);
+}, 10000);
 
 // Initialize Firebase for server
 let db: any = null;
@@ -37,6 +47,11 @@ async function startServer() {
 
   app.use(express.json());
 
+  // API Health Check
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
   // WhatsApp Client State
   let whatsappSocket: any = null;
   let whatsappQR: string | null = null;
@@ -46,52 +61,90 @@ async function startServer() {
     if (whatsappSocket) return;
 
     whatsappStatus = 'connecting';
-    const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '.baileys_auth'));
+    try {
+      const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '.baileys_auth'));
+      const { version, isLatest } = await fetchLatestBaileysVersion();
+      console.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`);
 
-    whatsappSocket = makeWASocket({
-      auth: state,
-      printQRInTerminal: false,
-      logger: pino({ level: 'silent' })
-    });
+      whatsappSocket = makeWASocket({
+        version,
+        auth: state,
+        printQRInTerminal: false,
+        logger: pino({ level: 'silent' })
+      });
 
-    whatsappSocket.ev.on('connection.update', async (update: any) => {
-      const { connection, lastDisconnect, qr } = update;
-      
-      if (qr) {
-        console.log('WhatsApp QR Received');
-        whatsappQR = await QRCode.toDataURL(qr);
-        whatsappStatus = 'qr';
-      }
+      store.bind(whatsappSocket.ev);
 
-      if (connection === 'close') {
-        const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
-        console.log('WhatsApp Connection closed. Reconnecting:', shouldReconnect);
-        whatsappStatus = 'disconnected';
-        whatsappSocket = null;
-        whatsappQR = null;
-        if (shouldReconnect) {
-          initializeWhatsApp();
+      whatsappSocket.ev.on('connection.update', async (update: any) => {
+        const { connection, lastDisconnect, qr } = update;
+        
+        if (qr) {
+          console.log('WhatsApp QR Received');
+          whatsappQR = await QRCode.toDataURL(qr);
+          whatsappStatus = 'qr';
         }
-      } else if (connection === 'open') {
-        console.log('WhatsApp Ready');
-        whatsappStatus = 'ready';
-        whatsappQR = null;
-      }
-    });
 
-    whatsappSocket.ev.on('creds.update', saveCreds);
-
-    whatsappSocket.ev.on('messages.upsert', (m: any) => {
-      if (m.type === 'notify') {
-        for (const msg of m.messages) {
-          console.log(`WhatsApp Message Received from ${msg.key.remoteJid}: ${msg.message?.conversation || msg.message?.extendedTextMessage?.text || 'Media/Other'}`);
+        if (connection === 'close') {
+          const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
+          console.log('WhatsApp Connection closed. Reconnecting:', shouldReconnect);
+          whatsappStatus = 'disconnected';
+          whatsappSocket = null;
+          whatsappQR = null;
+          if (shouldReconnect) {
+            setTimeout(initializeWhatsApp, 5000); // Wait 5 seconds before reconnecting
+          }
+        } else if (connection === 'open') {
+          console.log('WhatsApp Ready');
+          whatsappStatus = 'ready';
+          whatsappQR = null;
         }
-      }
-    });
+      });
+
+      whatsappSocket.ev.on('creds.update', saveCreds);
+
+      whatsappSocket.ev.on('messages.upsert', (m: any) => {
+        if (m.type === 'notify') {
+          for (const msg of m.messages) {
+            console.log(`WhatsApp Message Received from ${msg.key.remoteJid}: ${msg.message?.conversation || msg.message?.extendedTextMessage?.text || 'Media/Other'}`);
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error initializing WhatsApp:', error);
+      whatsappStatus = 'disconnected';
+      whatsappSocket = null;
+      whatsappQR = null;
+    }
   };
 
+  // WhatsApp CRM Endpoints
+  app.get("/api/whatsapp/chats", (req, res) => {
+    if (!whatsappSocket || whatsappStatus !== 'ready') {
+      return res.status(400).json({ error: "WhatsApp not connected" });
+    }
+    const chats = store.chats.all();
+    res.json(chats);
+  });
+
+  app.get("/api/whatsapp/messages/:jid", async (req, res) => {
+    const { jid } = req.params;
+    if (!whatsappSocket || whatsappStatus !== 'ready') {
+      return res.status(400).json({ error: "WhatsApp not connected" });
+    }
+    const messages = await store.loadMessages(jid, 50, undefined);
+    res.json(messages);
+  });
+
+  app.get("/api/whatsapp/contacts", (req, res) => {
+    res.json(Object.values(store.contacts));
+  });
+
   app.get("/api/whatsapp/status", (req, res) => {
-    res.json({ status: whatsappStatus, qr: whatsappQR });
+    res.json({ 
+      status: whatsappStatus, 
+      qr: whatsappQR,
+      user: whatsappSocket?.user || null
+    });
   });
 
   app.post("/api/whatsapp/connect", async (req, res) => {
@@ -99,6 +152,28 @@ async function startServer() {
       await initializeWhatsApp();
     }
     res.json({ status: whatsappStatus, qr: whatsappQR });
+  });
+
+  app.post("/api/whatsapp/pair", async (req, res) => {
+    try {
+      const { phone } = req.body;
+      if (!phone) {
+        return res.status(400).json({ error: 'Número de telefone é obrigatório.' });
+      }
+
+      if (whatsappStatus === 'disconnected' || !whatsappSocket) {
+        await initializeWhatsApp();
+        // Wait a bit for the socket to initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      const cleanPhone = phone.replace(/\D/g, '');
+      const code = await whatsappSocket.requestPairingCode(cleanPhone);
+      res.json({ code });
+    } catch (error) {
+      console.error("Erro ao solicitar código de pareamento:", error);
+      res.status(500).json({ error: "Falha ao gerar código de pareamento." });
+    }
   });
 
   app.post("/api/whatsapp/logout", async (req, res) => {
@@ -113,6 +188,26 @@ async function startServer() {
       whatsappQR = null;
     }
     res.json({ success: true });
+  });
+
+  app.post("/api/whatsapp/send", async (req, res) => {
+    try {
+      const { phone, message } = req.body;
+      if (!phone || !message) {
+        return res.status(400).json({ error: 'Número e mensagem são obrigatórios.' });
+      }
+
+      if (whatsappStatus !== 'ready' || !whatsappSocket) {
+        return res.status(400).json({ error: 'WhatsApp não está conectado.' });
+      }
+
+      const cleanPhone = phone.replace(/\D/g, '') + '@s.whatsapp.net';
+      await whatsappSocket.sendMessage(cleanPhone, { text: message });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Erro ao enviar mensagem WhatsApp:", error);
+      res.status(500).json({ error: "Falha ao enviar mensagem." });
+    }
   });
 
   // API Route: Buscar Leads (New Architecture)
