@@ -1,0 +1,32 @@
+Crie um scraper Python completo para encontrar leads em lojas Shopify dentro do diretório `./scrapers/shopify_scraper/`. Se a pasta não existir, crie-a. Crie também o arquivo requirements.txt e um README explicativo lá dentro.
+
+O scraper deve:
+1. Receber uma lista de URLs de lojas Shopify (via arquivo .txt ou .csv)
+2. Para cada loja, acessar /products.json (endpoint público, sem autenticação)
+3. Analisar cada produto e verificar:
+   - Quantos produtos a loja tem
+   - Se algum produto tem vídeo (campo "media" ou "video" no JSON)
+   - Se usa apenas fotos estáticas
+4. Tentar extrair dados de contato do site principal:
+   - Email (buscar no footer, página de contato, meta tags)
+   - Link do Instagram
+   - WhatsApp (buscar padrão de número no site)
+5. Gerar um score de 0-100 baseado em:
+   - Sem vídeo nenhum = +25 pontos
+   - Mais de 20 produtos = +15 pontos (loja ativa)
+   - Tem Instagram = +10 pontos (canal de contato)
+   - Tem email = +10 pontos
+   - Roda ads (verificar se tem pixel do Facebook no HTML) = +30 pontos
+   - Produtos com preço > R$100 = +10 pontos (capacidade de pagar)
+6. Salvar resultados em um arquivo JSON e CSV com colunas:
+   loja_url, nome_loja, total_produtos, tem_video, email, instagram,
+   whatsapp, pixel_facebook, score, data_coleta
+7. Incluir rate limiting (1 request a cada 2 segundos)
+8. Incluir tratamento de erros (lojas offline, /products.json desabilitado)
+9. Usar aiohttp para requests assíncronos mas respeitando o rate limit
+
+Stack: Python 3.11+, aiohttp, beautifulsoup4, pandas
+Não use Selenium/Playwright (desnecessário para endpoints JSON).
+Inclua requirements.txt e README com instruções de uso.
+
+Aja DIRETAMENTE e crie os arquivos agora mesmo sem me perguntar.

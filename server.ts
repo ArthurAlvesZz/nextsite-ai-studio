@@ -805,6 +805,55 @@ async function startServer() {
     }
   });
 
+  // Lead Engine: Run Shopify Scraper
+  app.post("/api/scrapers/shopify/run", requireAdmin, async (req: any, res) => {
+    try {
+      const { urls } = req.body;
+      if (!urls || urls.length === 0) {
+        return res.status(400).json({ error: "Lista de URLs vazia." });
+      }
+
+      const scraperDir = path.join(process.cwd(), 'scrapers', 'shopify_scraper');
+      if (!fs.existsSync(scraperDir)) {
+        fs.mkdirSync(scraperDir, { recursive: true });
+      }
+
+      const timestamp = Date.now();
+      const inputFilename = path.join(scraperDir, `input_${timestamp}.txt`);
+      const outputFilename = path.join(scraperDir, `output_${timestamp}.json`);
+
+      fs.writeFileSync(inputFilename, urls.join('\n'));
+
+      const { spawn } = require('child_process');
+      const pythonProcess = spawn('python', ['shopify_scraper.py', inputFilename, '--output', outputFilename], { cwd: scraperDir });
+
+      let logs = '';
+      pythonProcess.stdout.on('data', (data: any) => logs += data.toString());
+      pythonProcess.stderr.on('data', (data: any) => logs += data.toString());
+
+      pythonProcess.on('close', (code: any) => {
+        if (code !== 0) {
+          console.error(`Scraper exited with code ${code}. Logs:`, logs);
+          return res.status(500).json({ error: "Scraper falhou.", logs });
+        }
+        
+        // Read the result
+        try {
+          if (fs.existsSync(outputFilename)) {
+             const results = JSON.parse(fs.readFileSync(outputFilename, 'utf8'));
+             res.json({ success: true, results, logs });
+          } else {
+             res.status(500).json({ error: "Scraper não gerou arquivo de saída.", logs });
+          }
+        } catch (e) {
+          res.status(500).json({ error: "Falha ao ler resultado do scraper.", logs });
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: "Falha interna.", details: err.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AdminSidebar from '../components/AdminSidebar';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from '../firebase';
@@ -64,6 +64,51 @@ export default function AdminLeadEngine() {
     telegram: { leadsToday: 45, activeListeners: 8, connectionStability: 99, lastSync: "Active", status: 'running' },
     global: { enginesRunning: 3, lastSync: "2m ago" }
   });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isShopifyScannerRunning, setIsShopifyScannerRunning] = useState(false);
+
+  const handleStartShopifyScanner = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsShopifyScannerRunning(true);
+    
+    try {
+      const text = await file.text();
+      const urls = text.split('\n').map(url => url.trim()).filter(url => url && url.startsWith('http'));
+
+      const user = auth.currentUser;
+      const token = user ? await user.getIdToken() : '';
+      
+      const res = await fetch('/api/scrapers/shopify/run', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ urls })
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao rodar scraper');
+      
+      alert(`Scraper finalizado! ${data.results?.length || 0} lojas processadas com sucesso.`);
+      
+      // Download the result as JSON
+      const blob = new Blob([JSON.stringify(data.results, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `shopify_leads_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch(err: any) {
+      alert("Erro no scraper: " + err.message);
+    } finally {
+      setIsShopifyScannerRunning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const fetchLeads = async () => {
     try {
@@ -903,9 +948,17 @@ export default function AdminLeadEngine() {
                       ))}
                     </div>
                     <div className="flex items-center gap-3">
-                      <button className="flex-1 bg-red-400/10 text-red-400 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-red-400/20 transition-colors border border-red-400/20">
-                        <AlertCircle className="w-4 h-4" />
-                        SHUT DOWN
+                      <input type="file" accept=".txt,.csv" ref={fileInputRef} onChange={handleStartShopifyScanner} className="hidden" />
+                      <button 
+                        onClick={() => !isShopifyScannerRunning && fileInputRef.current?.click()}
+                        disabled={isShopifyScannerRunning}
+                        className={`flex-1 ${isShopifyScannerRunning ? 'bg-amber-400/10 text-amber-400 border-amber-400/20 cursor-wait' : 'bg-secondary/10 text-secondary border-secondary/20 hover:bg-secondary/20'} py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors border`}
+                      >
+                         {isShopifyScannerRunning ? (
+                           <><Loader2 className="w-4 h-4 animate-spin" /> RUNNING...</>
+                         ) : (
+                           <><Zap className="w-4 h-4" /> START SCANNER</>
+                         )}
                       </button>
                       <button className="w-14 h-12 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center hover:bg-white/10 transition-colors">
                         <Settings className="w-5 h-5 text-white/40" />
