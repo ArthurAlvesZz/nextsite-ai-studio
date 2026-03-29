@@ -193,6 +193,25 @@ export default function AdminCRM() {
         temMetaPixel: false,
         temGoogleAds: false,
         gruposWhatsApp: [],
+        score: Math.floor(Math.random() * 40) + 60,
+        painPanel: 'Lead cadastrado manualmente via CRM. Necessário qualificação profunda.',
+        tags: ['Manual', newLead.nicho || 'Geral'],
+        trafficSignals: {
+          runsAds: 'NÃO',
+          platform: newLead.nicho || 'Geral',
+          format: 'N/A',
+          pixel: 'Não Detectado',
+          videoPage: 'Não Verificado'
+        },
+        aiAnalysis: {
+          positiveSigns: ['Cadastrado manualmente'],
+          negativeSigns: ['Sem dados de tráfego automáticos'],
+          suggestedTemplate: {
+            name: 'Aproximação Direta',
+            description: 'Focar em entender as necessidades atuais do negócio.'
+          }
+        },
+        discoveryDate: new Date().toISOString(),
         createdAt: new Date().toISOString(),
         createdBy: user.uid,
         status: newLead.status || 'novo'

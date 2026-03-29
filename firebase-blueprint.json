@@ -69,7 +69,46 @@
         "capitalSocial": { "type": "number" },
         "logo": { "type": "string" },
         "abordagemWhatsApp": { "type": "string" },
+        "score": { "type": "number" },
+        "painPanel": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "trafficSignals": {
+          "type": "object",
+          "properties": {
+            "runsAds": { "type": "string" },
+            "platform": { "type": "string" },
+            "format": { "type": "string" },
+            "pixel": { "type": "string" },
+            "videoPage": { "type": "string" }
+          }
+        },
+        "aiAnalysis": {
+          "type": "object",
+          "properties": {
+            "positiveSigns": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "negativeSigns": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "suggestedTemplate": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" }
+              }
+            }
+          }
+        },
         "status": { "type": "string", "enum": ["novo", "contatado", "negociacao", "fechado"] },
+        "discoveryDate": { "type": "string", "format": "date-time" },
+        "lastContact": { "type": "string", "format": "date-time" },
+        "latestLog": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "createdBy": { "type": "string" },
         "updatedBy": { "type": "string" }

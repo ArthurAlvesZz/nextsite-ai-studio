@@ -1,4 +1,4 @@
-export type LeadStatus = 'novo' | 'contatado' | 'negociacao' | 'fechado';
+export type LeadStatus = 'novo' | 'new' | 'contatado' | 'contacted' | 'qualified' | 'negociacao' | 'fechado' | 'lost';
 
 export interface LeadColhido {
   id?: string;
@@ -16,6 +16,27 @@ export interface LeadColhido {
   logo: string | null;
   abordagemWhatsApp: string | null;
   status: LeadStatus;
+  score: number;
+  painPanel: string;
+  tags: string[];
+  trafficSignals: {
+    runsAds: string;
+    platform: string;
+    format: string;
+    pixel: string;
+    videoPage: string;
+  };
+  aiAnalysis: {
+    positiveSigns: string[];
+    negativeSigns: string[];
+    suggestedTemplate: {
+      name: string;
+      description: string;
+    };
+  };
+  discoveryDate: string;
+  lastContact?: string;
+  latestLog?: string;
   createdAt: any; // Timestamp
   createdBy: string;
   updatedBy?: string;

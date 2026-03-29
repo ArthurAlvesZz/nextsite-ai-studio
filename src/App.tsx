@@ -8,6 +8,7 @@ import AdminVideos from './pages/AdminVideos';
 import AdminSales from './pages/AdminSales';
 import AdminTools from './pages/AdminTools';
 import AdminLeadEngine from './pages/AdminLeadEngine';
+import LeadDetail from './pages/LeadDetail';
 import AdminNextZap from './pages/AdminNextZap';
 import AdminSoraRemover from './pages/AdminSoraRemover';
 import EmployeeProfile from './pages/EmployeeProfile';
@@ -1385,6 +1386,7 @@ export default function App() {
           <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />
           <Route path="/admin/tools" element={<ProtectedRoute><AdminTools /></ProtectedRoute>} />
           <Route path="/admin/lead-engine" element={<ProtectedRoute><AdminLeadEngine /></ProtectedRoute>} />
+          <Route path="/admin/lead/:id" element={<ProtectedRoute><LeadDetail /></ProtectedRoute>} />
           <Route path="/admin/nextzap" element={<ProtectedRoute><AdminNextZap /></ProtectedRoute>} />
           <Route path="/admin/sora-remover" element={<ProtectedRoute><AdminSoraRemover /></ProtectedRoute>} />
           <Route path="/admin/team/:id" element={<ProtectedRoute><EmployeeProfile /></ProtectedRoute>} />

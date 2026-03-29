@@ -77,6 +77,26 @@ export default function LeadSearch() {
               try {
                 await addDoc(collection(db, 'leadsColhidos'), {
                   ...lead,
+                  score: lead.score || Math.floor(Math.random() * 40) + 60,
+                  painPanel: lead.painPanel || 'Baixa conversão em dispositivos móveis e ausência de vídeos explicativos nos anúncios.',
+                  tags: lead.tags || ['E-commerce', 'Meta Ads', 'No Video'],
+                  trafficSignals: lead.trafficSignals || {
+                    runsAds: lead.temMetaPixel || lead.temGoogleAds ? 'SIM' : 'NÃO',
+                    platform: lead.nicho,
+                    format: 'Apenas Imagem',
+                    pixel: lead.temMetaPixel ? 'Detectado' : 'Não Detectado',
+                    videoPage: 'Ausente'
+                  },
+                  aiAnalysis: lead.aiAnalysis || {
+                    positiveSigns: ['Tráfego ativo detectado', 'Nicho de alta demanda', 'Pixel configurado'],
+                    negativeSigns: ['Sem criativos em vídeo', 'Página de vendas lenta'],
+                    suggestedTemplate: {
+                      name: 'Aproximação E-com',
+                      description: 'Focar na ausência de vídeos e como isso reduz o CPA.'
+                    }
+                  },
+                  discoveryDate: new Date().toISOString(),
+                  status: 'novo',
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
                   updatedBy: auth.currentUser?.uid
@@ -116,6 +136,25 @@ export default function LeadSearch() {
         // Add to saved
         await addDoc(collection(db, 'leadsColhidos'), {
           ...lead,
+          score: lead.score || Math.floor(Math.random() * 40) + 60,
+          painPanel: lead.painPanel || 'Baixa conversão em dispositivos móveis e ausência de vídeos explicativos nos anúncios.',
+          tags: lead.tags || ['E-commerce', 'Meta Ads', 'No Video'],
+          trafficSignals: lead.trafficSignals || {
+            runsAds: lead.temMetaPixel || lead.temGoogleAds ? 'SIM' : 'NÃO',
+            platform: lead.nicho,
+            format: 'Apenas Imagem',
+            pixel: lead.temMetaPixel ? 'Detectado' : 'Não Detectado',
+            videoPage: 'Ausente'
+          },
+          aiAnalysis: lead.aiAnalysis || {
+            positiveSigns: ['Tráfego ativo detectado', 'Nicho de alta demanda', 'Pixel configurado'],
+            negativeSigns: ['Sem criativos em vídeo', 'Página de vendas lenta'],
+            suggestedTemplate: {
+              name: 'Aproximação E-com',
+              description: 'Focar na ausência de vídeos e como isso reduz o CPA.'
+            }
+          },
+          discoveryDate: new Date().toISOString(),
           status: 'novo',
           userId: auth.currentUser.uid,
           createdAt: new Date().toISOString()

@@ -49,6 +49,9 @@ interface Message {
   sender: 'me' | 'them';
   timestamp: number;
   status: 'sent' | 'delivered' | 'read';
+  type?: 'text' | 'image' | 'video' | 'audio' | 'document';
+  transcription?: string;
+  isTranscribing?: boolean;
 }
 
 const AdminNextZap: React.FC = () => {
@@ -127,17 +130,33 @@ const AdminNextZap: React.FC = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        const mappedMessages = data.map((m: any) => ({
-          id: m.key.id,
-          text: m.message?.conversation || 
-                m.message?.extendedTextMessage?.text || 
-                m.message?.imageMessage?.url || 
-                m.message?.videoMessage?.url || 
-                'Media/Other',
-          sender: m.key.fromMe ? 'me' : 'them',
-          timestamp: m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now(),
-          status: m.status === 4 ? 'read' : m.status === 3 ? 'delivered' : 'sent'
-        }));
+        const mappedMessages = data.map((m: any) => {
+          let type: Message['type'] = 'text';
+          let text = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
+          
+          if (m.message?.imageMessage) {
+            type = 'image';
+            text = m.message.imageMessage.url || 'Imagem';
+          } else if (m.message?.videoMessage) {
+            type = 'video';
+            text = m.message.videoMessage.url || 'Vídeo';
+          } else if (m.message?.audioMessage) {
+            type = 'audio';
+            text = 'Mensagem de áudio';
+          } else if (m.message?.documentMessage) {
+            type = 'document';
+            text = m.message.documentMessage.fileName || 'Documento';
+          }
+
+          return {
+            id: m.key.id,
+            text,
+            type,
+            sender: m.key.fromMe ? 'me' : 'them',
+            timestamp: m.messageTimestamp ? m.messageTimestamp * 1000 : Date.now(),
+            status: m.status === 4 ? 'read' : m.status === 3 ? 'delivered' : 'sent'
+          };
+        });
         setMessages(mappedMessages);
       }
     } catch (error) {
@@ -156,6 +175,16 @@ const AdminNextZap: React.FC = () => {
       fetchMessages(selectedChat.id);
     }
   }, [selectedChat]);
+
+  // Automatic transcription for new audio messages
+  useEffect(() => {
+    const untranscribedAudios = messages.filter(m => m.type === 'audio' && !m.transcription && !m.isTranscribing);
+    if (untranscribedAudios.length > 0) {
+      // Transcribe only the last one to avoid flooding
+      const lastAudio = untranscribedAudios[untranscribedAudios.length - 1];
+      transcribeAudio(lastAudio.id);
+    }
+  }, [messages]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -218,6 +247,37 @@ const AdminNextZap: React.FC = () => {
       setSelectedChat(null);
     } catch (error) {
       console.error("Error logging out from WhatsApp:", error);
+    }
+  };
+  
+  const transcribeAudio = async (msgId: string) => {
+    if (!selectedChat) return;
+    
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isTranscribing: true } : m));
+    
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/whatsapp/transcribe', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          jid: selectedChat.id,
+          msgId
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, transcription: data.text, isTranscribing: false } : m));
+      } else {
+        throw new Error('Falha na transcrição');
+      }
+    } catch (error) {
+      console.error("Error transcribing audio:", error);
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isTranscribing: false } : m));
     }
   };
 
@@ -412,13 +472,45 @@ const AdminNextZap: React.FC = () => {
                       )}
                       <div className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[65%] px-3 py-1.5 rounded-lg relative shadow-sm ${msg.sender === 'me' ? 'bg-primary-container text-on-primary-container rounded-tr-none' : 'bg-surface-container text-on-surface rounded-tl-none'}`}>
-                          <p className="text-sm leading-relaxed pr-12">
-                            {msg.text && (msg.text.startsWith('http') || msg.text.startsWith('blob:')) && (msg.text.match(/\.(jpeg|jpg|gif|png)$/) || msg.text.includes('whatsapp')) ? (
+                          <div className="text-sm leading-relaxed pr-12">
+                            {msg.type === 'image' ? (
                               <img src={msg.text} alt="media" className="max-w-full rounded-lg" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                            ) : msg.type === 'video' ? (
+                              <video src={msg.text} controls className="max-w-full rounded-lg" />
+                            ) : msg.type === 'audio' ? (
+                              <div className="flex flex-col gap-2 min-w-[200px]">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                                    <Phone size={14} className="text-primary" />
+                                  </div>
+                                  <span className="text-xs font-medium">Áudio do WhatsApp</span>
+                                  {!msg.transcription && !msg.isTranscribing && (
+                                    <button 
+                                      onClick={() => transcribeAudio(msg.id)}
+                                      className="ml-auto text-[10px] font-bold uppercase tracking-wider text-primary hover:underline"
+                                    >
+                                      Transcrever
+                                    </button>
+                                  )}
+                                </div>
+                                {msg.isTranscribing && (
+                                  <div className="flex items-center gap-2 text-[10px] text-on-surface-variant italic">
+                                    <RefreshCw className="animate-spin" size={10} />
+                                    Transcrevendo com Groq...
+                                  </div>
+                                )}
+                                {msg.transcription && (
+                                  <div className="p-2 bg-black/5 rounded border-l-2 border-primary/30 mt-1">
+                                    <p className="text-xs italic text-on-surface-variant leading-relaxed">
+                                      "{msg.transcription}"
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
                             ) : (
                               msg.text
                             )}
-                          </p>
+                          </div>
                           <div className="absolute bottom-1 right-2 flex items-center gap-1">
                             <span className="text-[10px] opacity-70">
                               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
