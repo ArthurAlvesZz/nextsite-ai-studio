@@ -34,7 +34,7 @@ export default function AdminTools() {
   const tools = [
     { name: 'Remove WaterMark Sora 2', icon: 'water_drop', color: 'text-secondary', link: '/admin/sora-remover' },
     { name: 'NextZap CRM', icon: 'chat', color: 'text-[#00a884]', link: '/admin/nextzap' },
-    { name: 'Asset Library', icon: 'folder_special', color: 'text-white' },
+    { name: 'Lead Engine', icon: 'target', color: 'text-secondary', link: '/admin/lead-engine' },
     { name: 'Color Palettes', icon: 'palette', color: 'text-secondary/70' }
   ];
 

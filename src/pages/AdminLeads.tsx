@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, deleteDoc, doc, where, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { useAuth } from '../hooks/useAuth';
@@ -40,7 +40,8 @@ export default function AdminLeads() {
 
     const q = query(
       collection(db, 'leadsColhidos'),
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'desc'),
+      limit(200)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const leadsData = snapshot.docs.map(doc => ({
@@ -84,7 +85,7 @@ export default function AdminLeads() {
 
   return (
     <div className="flex min-h-screen bg-[#050505] text-white font-body">
-      <AdminSidebar activePage="dashboard" />
+      <AdminSidebar activePage="leads" />
       
       <main className="flex-1 p-8 md:p-12 overflow-y-auto">
         <div className="max-w-7xl mx-auto">

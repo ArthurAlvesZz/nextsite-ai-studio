@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, query, orderBy, where, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { useAuth } from './useAuth';
@@ -34,7 +34,8 @@ export function useSales() {
 
     const q = query(
       collection(db, 'sales'), 
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'desc'),
+      limit(200)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {

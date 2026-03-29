@@ -17,7 +17,7 @@ async function test() {
     version,
     auth: state,
     printQRInTerminal: true,
-    logger: pino({ level: 'info' })
+    logger: pino({ level: 'info' }) as any
   });
 
   sock.ev.on('connection.update', (update) => {

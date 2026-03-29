@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface AdminSidebarProps {
-  activePage: 'dashboard' | 'vendas' | 'clientes' | 'videos' | 'tools' | 'settings' | 'team' | 'profile';
+  activePage: 'dashboard' | 'vendas' | 'clientes' | 'videos' | 'leads' | 'tools' | 'settings' | 'team' | 'profile';
 }
 
 export default function AdminSidebar({ activePage }: AdminSidebarProps) {
@@ -76,6 +76,17 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
         >
           <span className="material-symbols-outlined text-lg">movie_filter</span>
           <span className="font-headline font-bold text-xs uppercase tracking-widest">Vídeos</span>
+        </Link>
+        <Link 
+          to="/admin/leads" 
+          className={`flex items-center gap-3 px-4 py-3 rounded-xl mx-2 transition-all ${
+            activePage === 'leads'
+              ? 'text-on-secondary bg-gradient-to-r from-secondary to-primary shadow-[0_0_20px_rgba(233,179,255,0.2)]' 
+              : 'text-white/50 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <span className="material-symbols-outlined text-lg">person_search</span>
+          <span className="font-headline font-bold text-xs uppercase tracking-widest">Colhedor de Lead</span>
         </Link>
         <Link 
           to="/admin/tools" 

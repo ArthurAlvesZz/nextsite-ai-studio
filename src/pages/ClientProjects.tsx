@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import ClientSidebar from '../components/ClientSidebar';
 import ClientTopbar from '../components/ClientTopbar';
 import { auth, db } from '../firebase';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, getDocs } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -13,7 +13,9 @@ export default function ClientProjects() {
   const [filter, setFilter] = useState('Todos');
 
   useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+    let unsubscribeDemands: () => void;
+
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       if (user) {
         const email = user.email || '';
         const accessId = email.split('@')[0];
@@ -24,7 +26,8 @@ export default function ClientProjects() {
           where('accessId', '==', accessId)
         );
 
-        const unsubscribeClients = onSnapshot(clientsQuery, (snapshot) => {
+        try {
+          const snapshot = await getDocs(clientsQuery);
           if (!snapshot.empty) {
             const clientDoc = snapshot.docs[0];
             const clientId = clientDoc.id;
@@ -36,7 +39,7 @@ export default function ClientProjects() {
               orderBy('createdAt', 'desc')
             );
 
-            const unsubscribeDemands = onSnapshot(demandsQuery, (demandsSnapshot) => {
+            unsubscribeDemands = onSnapshot(demandsQuery, (demandsSnapshot) => {
               const demandsData = demandsSnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
@@ -44,20 +47,24 @@ export default function ClientProjects() {
               setProjects(demandsData);
               setLoading(false);
             });
-
-            return () => unsubscribeDemands();
           } else {
             setLoading(false);
           }
-        });
-
-        return () => unsubscribeClients();
+        } catch (error) {
+          console.error("Error fetching client:", error);
+          setLoading(false);
+        }
       } else {
         setLoading(false);
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeDemands) {
+        unsubscribeDemands();
+      }
+    };
   }, []);
 
   const filteredProjects = projects.filter(p => {

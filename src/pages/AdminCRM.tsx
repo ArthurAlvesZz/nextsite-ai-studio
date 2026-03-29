@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, Timestamp, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, Timestamp, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { useAuth } from '../hooks/useAuth';
@@ -36,7 +36,8 @@ export default function AdminCRM() {
 
     const q = query(
       collection(db, 'leadsColhidos'),
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'desc'),
+      limit(200)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const leadsData = snapshot.docs.map(doc => ({

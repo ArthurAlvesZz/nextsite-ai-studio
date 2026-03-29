@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy, where, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, updateDoc, query, orderBy, where, getDoc, limit } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 import { useAuth } from './useAuth';
@@ -41,7 +41,8 @@ export function useDemands() {
 
     const q = query(
       collection(db, 'demands'),
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'desc'),
+      limit(200)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {

@@ -130,8 +130,8 @@ service cloud.firestore {
     }
     
     match /presence/{sessionId} {
-      // Anyone can read and write presence to show online users
-      allow read, write: if true;
+      // Anyone authenticated can read and write presence to show online users
+      allow read, write: if isAuthenticated();
     }
   }
 }

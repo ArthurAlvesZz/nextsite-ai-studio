@@ -7,6 +7,7 @@ import AdminClients from './pages/AdminClients';
 import AdminVideos from './pages/AdminVideos';
 import AdminSales from './pages/AdminSales';
 import AdminTools from './pages/AdminTools';
+import AdminLeadEngine from './pages/AdminLeadEngine';
 import AdminNextZap from './pages/AdminNextZap';
 import AdminSoraRemover from './pages/AdminSoraRemover';
 import EmployeeProfile from './pages/EmployeeProfile';
@@ -17,6 +18,7 @@ import ClientPurchases from './pages/ClientPurchases';
 import ClientSettings from './pages/ClientSettings';
 import AdminProfile from './pages/AdminProfile';
 import ProtectedRoute from './components/ProtectedRoute';
+import ClientProtectedRoute from './components/ClientProtectedRoute';
 import { motion, useScroll, useTransform, AnimatePresence } from 'motion/react';
 import { useAgencySettings } from './hooks/useAgencySettings';
 import gsap from 'gsap';
@@ -1369,10 +1371,10 @@ export default function App() {
           
           {/* Client Routes */}
           <Route path="/client/login" element={<ClientLogin />} />
-          <Route path="/client/dashboard" element={<ClientDashboard />} />
-          <Route path="/client/projects" element={<ClientProjects />} />
-          <Route path="/client/purchases" element={<ClientPurchases />} />
-          <Route path="/client/settings" element={<ClientSettings />} />
+          <Route path="/client/dashboard" element={<ClientProtectedRoute><ClientDashboard /></ClientProtectedRoute>} />
+          <Route path="/client/projects" element={<ClientProtectedRoute><ClientProjects /></ClientProtectedRoute>} />
+          <Route path="/client/purchases" element={<ClientProtectedRoute><ClientPurchases /></ClientProtectedRoute>} />
+          <Route path="/client/settings" element={<ClientProtectedRoute><ClientSettings /></ClientProtectedRoute>} />
 
           {/* Protected Admin Routes */}
           <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
@@ -1382,6 +1384,7 @@ export default function App() {
           <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />
           <Route path="/admin/sales" element={<ProtectedRoute><AdminSales /></ProtectedRoute>} />
           <Route path="/admin/tools" element={<ProtectedRoute><AdminTools /></ProtectedRoute>} />
+          <Route path="/admin/lead-engine" element={<ProtectedRoute><AdminLeadEngine /></ProtectedRoute>} />
           <Route path="/admin/nextzap" element={<ProtectedRoute><AdminNextZap /></ProtectedRoute>} />
           <Route path="/admin/sora-remover" element={<ProtectedRoute><AdminSoraRemover /></ProtectedRoute>} />
           <Route path="/admin/team/:id" element={<ProtectedRoute><EmployeeProfile /></ProtectedRoute>} />

@@ -4,7 +4,7 @@ import { NICHOS, LeadColhido } from '../types/lead';
 import { auth, db } from '../firebase';
 import AdminSidebar from '../components/AdminSidebar';
 import { useAuth } from '../hooks/useAuth';
-import { collection, addDoc, query, where, getDocs, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, deleteDoc, doc, onSnapshot, limit, orderBy } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export default function LeadSearch() {
@@ -22,7 +22,9 @@ export default function LeadSearch() {
     }
 
     const q = query(
-      collection(db, 'leadsColhidos')
+      collection(db, 'leadsColhidos'),
+      orderBy('createdAt', 'desc'),
+      limit(200)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const urls = new Set(snapshot.docs.map(doc => doc.data().url));
@@ -48,12 +50,17 @@ export default function LeadSearch() {
     setResults([]);
 
     try {
+      const token = await auth.currentUser?.getIdToken();
       const response = await fetch('/api/leads/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           nicho,
-          uid
+          uid,
+          savedUrls: Array.from(savedLeadUrls)
         })
       });
 
@@ -63,6 +70,22 @@ export default function LeadSearch() {
         setMessage(data.message || 'Busca concluída.');
         if (data.leads) {
           setResults(data.leads);
+          
+          // Auto-save new leads to preserve original behavior
+          data.leads.forEach(async (lead: LeadColhido) => {
+            if (!savedLeadUrls.has(lead.url)) {
+              try {
+                await addDoc(collection(db, 'leadsColhidos'), {
+                  ...lead,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                  updatedBy: auth.currentUser?.uid
+                });
+              } catch (error) {
+                console.error("Error auto-saving lead:", error);
+              }
+            }
+          });
         }
       } else {
         const errorMsg = data.details ? `${data.error}: ${data.details}` : data.error;

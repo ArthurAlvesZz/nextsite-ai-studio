@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import ClientSidebar from '../components/ClientSidebar';
 import ClientTopbar from '../components/ClientTopbar';
 import { auth, db } from '../firebase';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, getDocs } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -14,7 +14,9 @@ export default function ClientPurchases() {
   const [filter, setFilter] = useState('Todos');
 
   useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+    let unsubscribeSales: () => void;
+
+    const unsubscribeAuth = auth.onAuthStateChanged(async (user) => {
       if (user) {
         const email = user.email || '';
         const accessId = email.split('@')[0];
@@ -25,7 +27,8 @@ export default function ClientPurchases() {
           where('accessId', '==', accessId)
         );
 
-        const unsubscribeClients = onSnapshot(clientsQuery, (snapshot) => {
+        try {
+          const snapshot = await getDocs(clientsQuery);
           if (!snapshot.empty) {
             const clientDoc = snapshot.docs[0];
             const clientId = clientDoc.id;
@@ -37,7 +40,7 @@ export default function ClientPurchases() {
               orderBy('createdAt', 'desc')
             );
 
-            const unsubscribeSales = onSnapshot(salesQuery, (salesSnapshot) => {
+            unsubscribeSales = onSnapshot(salesQuery, (salesSnapshot) => {
               const salesData = salesSnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
@@ -48,20 +51,24 @@ export default function ClientPurchases() {
               setTotalInvested(total);
               setLoading(false);
             });
-
-            return () => unsubscribeSales();
           } else {
             setLoading(false);
           }
-        });
-
-        return () => unsubscribeClients();
+        } catch (error) {
+          console.error("Error fetching client:", error);
+          setLoading(false);
+        }
       } else {
         setLoading(false);
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeSales) {
+        unsubscribeSales();
+      }
+    };
   }, []);
 
   const filteredPurchases = purchases.filter(p => {

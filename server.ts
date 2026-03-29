@@ -4,10 +4,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, getDocs, addDoc, query, orderBy, limit } from "firebase/firestore";
+import admin from "firebase-admin";
 import fs from "fs";
 import QRCode from "qrcode";
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from "@whiskeysockets/baileys";
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from "@whiskeysockets/baileys";
 import pino from "pino";
 
 dotenv.config();
@@ -16,7 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Baileys Store
-const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) as any });
 const storePath = path.join(__dirname, '.baileys_store.json');
 if (fs.existsSync(storePath)) {
   store.readFromFile(storePath);
@@ -26,20 +26,73 @@ setInterval(() => {
 }, 10000);
 
 // Initialize Firebase for server
-let db: any = null;
 try {
   const firebaseConfigPath = path.join(__dirname, 'firebase-applet-config.json');
   if (fs.existsSync(firebaseConfigPath)) {
     const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
     const app = initializeApp(firebaseConfig);
-    db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
     console.log("Firebase initialized on server");
+    
+    // Initialize Firebase Admin
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        projectId: firebaseConfig.projectId,
+      });
+      console.log("Firebase Admin initialized");
+    }
   } else {
     console.warn("firebase-applet-config.json not found. Server-side Firebase features will be disabled.");
   }
 } catch (error) {
   console.error("Error initializing Firebase on server:", error);
 }
+
+// Middleware to protect API routes
+const requireAdmin = async (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
+  }
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    const uid = decodedToken.uid;
+    
+    // Check if user is admin or editor using REST API
+    const firebaseConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+    if (fs.existsSync(firebaseConfigPath)) {
+      const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/users/${uid}`;
+      
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        const userData = await response.json();
+        const role = userData.fields?.role?.stringValue;
+        if (role === 'admin' || role === 'editor') {
+          req.user = decodedToken;
+          return next();
+        }
+      } else {
+        console.warn(`Failed to fetch user role via REST API: ${response.status} ${response.statusText}`);
+      }
+    }
+    // Also check if it's the master owner
+    if (decodedToken.email === 'arthurfgalves@gmail.com' || decodedToken.email === '15599873676@nextcreatives.co') {
+      req.user = decodedToken;
+      return next();
+    }
+    
+    res.status(403).json({ error: 'Forbidden: Admin access required' });
+  } catch (error) {
+    console.error("Token verification failed:", error);
+    res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
+};
 
 async function startServer() {
   const app = express();
@@ -70,7 +123,7 @@ async function startServer() {
         version,
         auth: state,
         printQRInTerminal: false,
-        logger: pino({ level: 'silent' })
+        logger: pino({ level: 'silent' }) as any
       });
 
       store.bind(whatsappSocket.ev);
@@ -117,16 +170,52 @@ async function startServer() {
     }
   };
 
+  // Helper: Lead Scoring
+  const calculateLeadScore = (chat: any, lastMessage: any): number => {
+    let score = 50; // Base score
+    
+    // 1. Unread count impact
+    if (chat.unreadCount) score += chat.unreadCount * 5;
+    
+    // 2. Recency impact (if last message is from them)
+    if (lastMessage && !lastMessage.key.fromMe) {
+        const now = Date.now() / 1000;
+        const diff = now - (lastMessage.messageTimestamp || 0);
+        if (diff < 3600) score += 20; // Last hour
+        else if (diff < 86400) score += 10; // Last day
+    }
+    
+    return Math.min(100, Math.max(0, score));
+  };
+
   // WhatsApp CRM Endpoints
-  app.get("/api/whatsapp/chats", (req, res) => {
+  app.get("/api/whatsapp/chats", requireAdmin, async (req, res) => {
     if (!whatsappSocket || whatsappStatus !== 'ready') {
       return res.status(400).json({ error: "WhatsApp not connected" });
     }
     const chats = store.chats.all();
-    res.json(chats);
+    const enrichedChats = await Promise.all(chats.map(async (chat) => {
+      const messages = await store.loadMessages(chat.id, 1, undefined);
+      const lastMessage = messages[messages.length - 1];
+      let text = 'Nova Mensagem';
+      if (lastMessage?.message?.conversation) text = lastMessage.message.conversation;
+      else if (lastMessage?.message?.extendedTextMessage?.text) text = lastMessage.message.extendedTextMessage.text;
+      else if (lastMessage?.message?.imageMessage) text = '📷 Imagem';
+      else if (lastMessage?.message?.videoMessage) text = '🎥 Vídeo';
+      else if (lastMessage?.message?.audioMessage) text = '🎵 Áudio';
+      else if (lastMessage?.message?.documentMessage) text = '📄 Documento';
+      
+      return {
+        ...chat,
+        lastMessageText: text,
+        lastMessageTimestamp: lastMessage?.messageTimestamp || chat.conversationTimestamp || chat.lastMsgTimestamp || Date.now() / 1000,
+        leadScore: calculateLeadScore(chat, lastMessage)
+      };
+    }));
+    res.json(enrichedChats);
   });
 
-  app.get("/api/whatsapp/messages/:jid", async (req, res) => {
+  app.get("/api/whatsapp/messages/:jid", requireAdmin, async (req, res) => {
     const { jid } = req.params;
     if (!whatsappSocket || whatsappStatus !== 'ready') {
       return res.status(400).json({ error: "WhatsApp not connected" });
@@ -135,11 +224,11 @@ async function startServer() {
     res.json(messages);
   });
 
-  app.get("/api/whatsapp/contacts", (req, res) => {
+  app.get("/api/whatsapp/contacts", requireAdmin, (req, res) => {
     res.json(Object.values(store.contacts));
   });
 
-  app.get("/api/whatsapp/status", (req, res) => {
+  app.get("/api/whatsapp/status", requireAdmin, (req, res) => {
     res.json({ 
       status: whatsappStatus, 
       qr: whatsappQR,
@@ -147,14 +236,14 @@ async function startServer() {
     });
   });
 
-  app.post("/api/whatsapp/connect", async (req, res) => {
+  app.post("/api/whatsapp/connect", requireAdmin, async (req, res) => {
     if (whatsappStatus === 'disconnected') {
       await initializeWhatsApp();
     }
     res.json({ status: whatsappStatus, qr: whatsappQR });
   });
 
-  app.post("/api/whatsapp/pair", async (req, res) => {
+  app.post("/api/whatsapp/pair", requireAdmin, async (req, res) => {
     try {
       const { phone } = req.body;
       if (!phone) {
@@ -176,7 +265,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/whatsapp/logout", async (req, res) => {
+  app.post("/api/whatsapp/logout", requireAdmin, async (req, res) => {
     if (whatsappSocket) {
       try {
         await whatsappSocket.logout();
@@ -190,7 +279,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post("/api/whatsapp/send", async (req, res) => {
+  app.post("/api/whatsapp/send", requireAdmin, async (req, res) => {
     try {
       const { phone, message } = req.body;
       if (!phone || !message) {
@@ -210,10 +299,58 @@ async function startServer() {
     }
   });
 
-  // API Route: Buscar Leads (New Architecture)
-  app.post("/api/leads/search", async (req, res) => {
+  // Groq Transcription Endpoint
+  app.post("/api/transcribe", requireAdmin, async (req, res) => {
     try {
-      const { nicho, uid } = req.body;
+      const { audioUrl } = req.body;
+      if (!audioUrl) {
+        return res.status(400).json({ error: 'URL do áudio é obrigatória.' });
+      }
+
+      const groqApiKey = process.env.GROQ_API_KEY;
+      if (!groqApiKey) {
+        return res.status(500).json({ error: 'Chave de API da Groq não configurada.' });
+      }
+
+      // Fetch the audio file
+      const audioRes = await fetch(audioUrl);
+      if (!audioRes.ok) {
+        return res.status(400).json({ error: 'Falha ao baixar o arquivo de áudio.' });
+      }
+      const audioBuffer = await audioRes.arrayBuffer();
+
+      // Form data for Groq
+      const formData = new FormData();
+      const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+      formData.append('file', blob, 'audio.mp3');
+      formData.append('model', 'whisper-large-v3');
+
+      const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${groqApiKey}`
+        },
+        body: formData
+      });
+
+      if (!groqRes.ok) {
+        const errData = await groqRes.json();
+        console.error("Groq API Error:", errData);
+        return res.status(groqRes.status).json({ error: 'Erro na API da Groq', details: errData });
+      }
+
+      const data = await groqRes.json();
+      res.json(data);
+    } catch (error) {
+      console.error("Erro na transcrição:", error);
+      res.status(500).json({ error: 'Falha interna na transcrição.' });
+    }
+  });
+
+  // API Route: Buscar Leads (New Architecture)
+  app.post("/api/leads/search", requireAdmin, async (req, res) => {
+    try {
+      const { nicho, uid, savedUrls = [] } = req.body;
       
       if (!nicho || !uid) {
         return res.status(400).json({ error: 'Nicho e UID são obrigatórios.' });
@@ -250,13 +387,10 @@ async function startServer() {
         return res.json({ message: 'Nenhum resultado encontrado.', leads: [] });
       }
 
-      // Checar no Firestore se já existe em leadsColhidos
-      const leadsSnapshot = await getDocs(collection(db, 'leadsColhidos'));
-      const savedUrls = leadsSnapshot.docs.map(doc => doc.data().url);
-
-      const urlsParaProcessar = items
-        .map((item: any) => item.link)
-        .filter((link: string) => !savedUrls.includes(link));
+      // Checar no Firestore se já existe em leadsColhidos (Otimizado)
+      const itemLinks = items.map((item: any) => item.link);
+      
+      const urlsParaProcessar = itemLinks.filter((link: string) => !savedUrls.includes(link));
 
       if (urlsParaProcessar.length === 0) {
         return res.json({ message: 'Todos os leads encontrados já foram colhidos.', leads: [] });
@@ -375,7 +509,6 @@ async function startServer() {
             updatedBy: uid
           };
 
-          await addDoc(collection(db, 'leadsColhidos'), leadData);
           return leadData;
 
         } catch (error) {
