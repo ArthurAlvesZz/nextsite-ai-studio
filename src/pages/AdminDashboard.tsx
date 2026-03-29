@@ -80,6 +80,7 @@ export default function AdminDashboard() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('1m');
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const [rankingType, setRankingType] = useState<'sales' | 'videos'>('sales');
 
@@ -269,15 +270,25 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <AdminSidebar activePage="dashboard" />
+      <AdminSidebar activePage="dashboard" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}
-      <main className="ml-64 flex-1 min-h-screen relative">
+      <main className="md:ml-64 flex-1 min-h-screen relative w-full">
         {/* Top Bar */}
-        <header className="fixed top-0 right-0 w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10">
-          <GlobalSearch />
-          <div className="flex items-center gap-6">
-            <div className="flex bg-white/5 rounded-xl p-1 border border-white/10">
+        <header className="fixed top-0 right-0 w-full md:w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-6 md:px-10 gap-4">
+          <button 
+            className="md:hidden text-white/70 hover:text-white shrink-0"
+            onClick={() => setIsSidebarOpen(true)}
+          >
+            <span className="material-symbols-outlined text-2xl">menu</span>
+          </button>
+          
+          <div className="hidden md:block">
+            <GlobalSearch />
+          </div>
+
+          <div className="flex items-center gap-2 md:gap-6 ml-auto flex-wrap justify-end">
+            <div className="flex bg-white/5 rounded-xl p-1 border border-white/10 overflow-x-auto max-w-[200px] md:max-w-none scrollbar-hide">
               {(['today', '7d', '14d', '1m', '6m'] as TimeFilter[]).map((f) => (
                 <button
                   key={f}
@@ -308,7 +319,7 @@ export default function AdminDashboard() {
         </header>
 
         {/* Scrollable Canvas */}
-        <div className="pt-32 pb-12 px-10 max-w-7xl mx-auto space-y-12">
+        <div className="pt-32 pb-12 px-6 md:px-10 max-w-7xl mx-auto space-y-12 w-full">
           {/* Custom Range Inputs */}
           {timeFilter === 'custom' && (
             <div className="flex gap-4 bg-white/[0.02] border border-white/10 p-4 rounded-2xl animate-in fade-in slide-in-from-top-4">

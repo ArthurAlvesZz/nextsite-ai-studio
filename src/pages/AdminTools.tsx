@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import { motion } from 'motion/react';
 
 export default function AdminTools() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const manuals = [
     {
       title: 'Manual de Cultura',
@@ -40,9 +41,9 @@ export default function AdminTools() {
 
   return (
     <div className="min-h-screen bg-[#020202] text-white font-body selection:bg-secondary selection:text-on-secondary flex">
-      <AdminSidebar activePage="tools" />
+      <AdminSidebar activePage="tools" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="ml-64 flex-1 min-h-screen relative flex flex-col">
+      <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
         {/* Decorative Background Elements */}
         <div className="fixed bottom-0 right-0 w-[500px] h-[500px] bg-secondary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
         <div className="fixed top-0 right-0 w-[300px] h-[300px] bg-primary/5 blur-[100px] rounded-full -z-10 pointer-events-none"></div>

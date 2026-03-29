@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Chaves Privadas do Firebase (Admin SDK)
+service-account.json

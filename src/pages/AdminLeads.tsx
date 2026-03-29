@@ -27,6 +27,7 @@ interface Lead {
 export default function AdminLeads() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNiche, setSelectedNiche] = useState('Todos');
   const { user } = useAuth();
@@ -85,7 +86,7 @@ export default function AdminLeads() {
 
   return (
     <div className="flex min-h-screen bg-[#050505] text-white font-body">
-      <AdminSidebar activePage="leads" />
+      <AdminSidebar activePage="leads" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       <main className="flex-1 p-8 md:p-12 overflow-y-auto">
         <div className="max-w-7xl mx-auto">

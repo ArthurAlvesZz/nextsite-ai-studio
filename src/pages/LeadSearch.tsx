@@ -9,6 +9,7 @@ import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export default function LeadSearch() {
   const [nicho, setNicho] = useState(NICHOS[0]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<LeadColhido[]>([]);
   const [savedLeadUrls, setSavedLeadUrls] = useState<Set<string>>(new Set());
@@ -167,9 +168,9 @@ export default function LeadSearch() {
 
   return (
     <div className="font-body text-on-background min-h-screen flex bg-[#050505] overflow-hidden">
-      <AdminSidebar activePage="dashboard" />
+      <AdminSidebar activePage="dashboard" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <main className="flex-1 ml-64 p-8 h-screen overflow-y-auto relative z-10">
+      <main className="flex-1 md:ml-64 w-full p-8 h-screen overflow-y-auto relative z-10">
         <div className="max-w-7xl mx-auto space-y-8">
           <div className="flex items-center justify-between">
             <div>

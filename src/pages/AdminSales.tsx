@@ -16,6 +16,7 @@ export default function AdminSales() {
   const { goalSettings } = useGoalSettings();
   
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [selectedSellerId, setSelectedSellerId] = useState('');
@@ -189,10 +190,10 @@ export default function AdminSales() {
         </div>
       </div>
 
-      <AdminSidebar activePage="vendas" />
+      <AdminSidebar activePage="vendas" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}
-      <main className="ml-64 flex-1 min-h-screen relative flex flex-col overflow-y-auto">
+      <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col overflow-y-auto">
         {/* Top Bar */}
         <header className="h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10 shrink-0 sticky top-0">
           <div className="flex items-center gap-6 flex-1">

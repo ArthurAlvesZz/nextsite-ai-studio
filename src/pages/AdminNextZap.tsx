@@ -59,6 +59,7 @@ const AdminNextZap: React.FC = () => {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'groups'>('all');
   const [isLoading, setIsLoading] = useState(true);
@@ -290,7 +291,7 @@ const AdminNextZap: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-surface text-on-surface font-sans overflow-hidden">
-      <AdminSidebar activePage="tools" />
+      <AdminSidebar activePage="tools" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       <main className="flex-1 ml-64 flex overflow-hidden">
         {/* Left Sidebar: Chat List */}

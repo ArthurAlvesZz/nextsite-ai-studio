@@ -7,9 +7,10 @@ import { collection, query, where, onSnapshot, orderBy, limit, updateDoc, doc } 
 interface ClientTopbarProps {
   title?: string;
   subtitle?: string;
+  onMenuClick?: () => void;
 }
 
-export default function ClientTopbar({ title = "Área do Cliente", subtitle = "Bem-vindo de volta 👋" }: ClientTopbarProps) {
+export default function ClientTopbar({ title = "Área do Cliente", subtitle = "Bem-vindo de volta 👋", onMenuClick }: ClientTopbarProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [clientData, setClientData] = useState<any>(null);
@@ -91,12 +92,22 @@ export default function ClientTopbar({ title = "Área do Cliente", subtitle = "B
     : 'NC';
 
   return (
-    <header className="sticky top-0 z-40 bg-[#050505]/80 backdrop-blur-xl border-b border-white/5 flex justify-between items-center px-12 py-8">
-      <div className="flex flex-col">
-        <h1 className="text-2xl font-black tracking-tighter text-white font-headline uppercase">{title}</h1>
-        <p className="text-[10px] text-white/30 font-bold uppercase tracking-[0.2em] mt-1">{subtitle}</p>
+    <header className="sticky top-0 z-40 bg-[#050505]/80 backdrop-blur-xl border-b border-white/5 flex justify-between items-center px-6 md:px-12 py-6 md:py-8 gap-4">
+      <div className="flex items-center gap-4">
+        {onMenuClick && (
+          <button 
+            onClick={onMenuClick}
+            className="md:hidden text-white/70 hover:text-white shrink-0"
+          >
+            <span className="material-symbols-outlined text-2xl">menu</span>
+          </button>
+        )}
+        <div className="flex flex-col">
+          <h1 className="text-xl md:text-2xl font-black tracking-tighter text-white font-headline uppercase truncate max-w-[150px] md:max-w-none">{title}</h1>
+          <p className="text-[9px] md:text-[10px] text-white/30 font-bold uppercase tracking-[0.2em] mt-1 truncate">{subtitle}</p>
+        </div>
       </div>
-      <div className="flex items-center gap-8">
+      <div className="flex items-center gap-4 md:gap-8">
         <div className="flex items-center gap-6">
           <div className="relative" ref={notificationsRef}>
             <button 

@@ -130,8 +130,10 @@ service cloud.firestore {
     }
     
     match /presence/{sessionId} {
-      // Anyone authenticated can read and write presence to show online users
-      allow read, write: if isAuthenticated();
+      // Only authenticated users can read/write presence (prevents unauthenticated flood)
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == resource.data.uid;
+      allow create: if isAuthenticated();
     }
   }
 }

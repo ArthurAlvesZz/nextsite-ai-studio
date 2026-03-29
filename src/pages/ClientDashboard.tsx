@@ -13,6 +13,7 @@ export default function ClientDashboard() {
   const [finishedProjects, setFinishedProjects] = useState<any[]>([]);
   const [planUsage, setPlanUsage] = useState<{ used: number; limit: number; percentage: number }>({ used: 0, limit: 0, percentage: 0 });
   const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const planLimits: Record<string, number> = {
     'Pacote Start': 2,
@@ -167,19 +168,22 @@ export default function ClientDashboard() {
   return (
     <div className="bg-[#050505] text-white font-body antialiased min-h-screen flex selection:bg-secondary selection:text-on-secondary">
       {/* SideNavBar Shell */}
-      <ClientSidebar activePage="dashboard" />
+      <ClientSidebar activePage="dashboard" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col ml-64 relative">
+      <div className="flex-1 flex flex-col md:ml-64 relative w-full overflow-hidden">
         {/* Background Effects */}
-        <div className="fixed bottom-0 right-0 w-[800px] h-[800px] bg-secondary/5 blur-[150px] rounded-full -z-10 pointer-events-none"></div>
-        <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
+        <div className="fixed bottom-0 right-0 w-[400px] md:w-[800px] h-[400px] md:h-[800px] bg-secondary/5 blur-[100px] md:blur-[150px] rounded-full -z-10 pointer-events-none"></div>
+        <div className="fixed top-0 right-0 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-primary/5 blur-[80px] md:blur-[120px] rounded-full -z-10 pointer-events-none"></div>
 
         {/* TopNavBar Shell */}
-        <ClientTopbar subtitle={loading ? 'Carregando...' : `Olá, ${clientName} 👋`} />
+        <ClientTopbar 
+          subtitle={loading ? 'Carregando...' : `Olá, ${clientName} 👋`} 
+          onMenuClick={() => setIsSidebarOpen(true)}
+        />
 
         {/* Main Canvas */}
-        <main className="p-12 space-y-16 max-w-7xl mx-auto w-full">
+        <main className="p-6 md:p-12 space-y-12 md:space-y-16 max-w-7xl mx-auto w-full">
           {/* 1. KPIs Section */}
           <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             <motion.div 

@@ -3,12 +3,29 @@ import { Link } from 'react-router-dom';
 
 interface ClientSidebarProps {
   activePage: 'dashboard' | 'projects' | 'purchases' | 'settings';
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export default function ClientSidebar({ activePage }: ClientSidebarProps) {
+export default function ClientSidebar({ activePage, isOpen = false, onClose }: ClientSidebarProps) {
   return (
-    <aside className="h-screen w-64 fixed left-0 top-0 bg-[#050505] border-r border-white/5 flex flex-col py-10 px-8 gap-12 z-50">
-      <div className="flex flex-col gap-1 px-2">
+    <>
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 md:hidden"
+          onClick={onClose}
+        />
+      )}
+      <aside className={`h-screen w-64 fixed left-0 top-0 bg-[#050505] border-r border-white/5 flex flex-col py-10 px-8 gap-12 z-50 transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        {isOpen && (
+          <button 
+            onClick={onClose}
+            className="md:hidden absolute top-6 right-6 text-white/50 hover:text-white"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        )}
+        <div className="flex flex-col gap-1 px-2 mt-4 md:mt-0">
         <div className="flex items-center gap-3 mb-4">
           <img 
             alt="Next Creatives Logo" 
@@ -73,6 +90,7 @@ export default function ClientSidebar({ activePage }: ClientSidebarProps) {
         </Link>
       </nav>
 
-    </aside>
+      </aside>
+    </>
   );
 }

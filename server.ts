@@ -7,8 +7,9 @@ import { initializeApp } from "firebase/app";
 import admin from "firebase-admin";
 import fs from "fs";
 import QRCode from "qrcode";
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from "@whiskeysockets/baileys";
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore, BufferJSON, AuthenticationCreds, initAuthCreds, SignalDataTypeMap } from "@whiskeysockets/baileys";
 import pino from "pino";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -101,6 +102,17 @@ const requireAdmin = async (req: any, res: any, next: any) => {
   }
 };
 
+// ─── SMTP Transporter (Hostinger) ─────────────────────────────────────────────
+const smtpTransporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "smtp.hostinger.com",
+  port: Number(process.env.SMTP_PORT) || 465,
+  secure: true,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -110,6 +122,54 @@ async function startServer() {
   // API Health Check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // AUTH — Password Recovery via SMTP
+  // ════════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/auth/forgot-password", async (req: any, res: any) => {
+    const { email } = req.body;
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: "E-mail inválido." });
+    }
+
+    try {
+      const resetLink = await admin.auth().generatePasswordResetLink(email, {
+        url: `${process.env.APP_URL || "http://localhost:3000"}/login`,
+      });
+
+      const fromName = process.env.SMTP_FROM_NAME || "Next Creative";
+      const fromEmail = process.env.SMTP_USER;
+
+      await smtpTransporter.sendMail({
+        from: `"${fromName}" <${fromEmail}>`,
+        to: email,
+        subject: "Recuperação de senha — Next Creative",
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0f0f0f;color:#fff;border-radius:12px;">
+            <h2 style="color:#a855f7;margin-bottom:8px;">Recuperação de senha</h2>
+            <p style="color:#ccc;margin-bottom:24px;">Recebemos uma solicitação para redefinir a senha da sua conta.</p>
+            <a href="${resetLink}"
+               style="display:inline-block;padding:14px 28px;background:#a855f7;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;">
+              Redefinir minha senha
+            </a>
+            <p style="color:#666;font-size:12px;margin-top:24px;">
+              Este link expira em 1 hora. Se você não solicitou a redefinição, ignore este e-mail.
+            </p>
+          </div>
+        `,
+      });
+
+      return res.json({ success: true, message: "Se o e-mail existir, um link de redefinição foi enviado." });
+    } catch (error: any) {
+      if (error?.errorInfo?.code === "auth/user-not-found") {
+        return res.json({ success: true, message: "Se o e-mail existir, um link de redefinição foi enviado." });
+      }
+      console.error("❌ Erro na recuperação de senha:", error);
+      return res.status(500).json({ error: "Falha ao enviar e-mail de recuperação." });
+    }
   });
 
   // WhatsApp Sessions State
@@ -453,7 +513,7 @@ async function startServer() {
       }
 
       const formData = new FormData();
-      const blob = new Blob([buffer], { type: 'audio/ogg' });
+      const blob = new Blob([new Uint8Array(buffer)], { type: 'audio/ogg' });
       formData.append('file', blob, 'audio.ogg');
       formData.append('model', 'whisper-large-v3');
 

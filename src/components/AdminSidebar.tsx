@@ -5,9 +5,11 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface AdminSidebarProps {
   activePage: 'dashboard' | 'vendas' | 'clientes' | 'videos' | 'leads' | 'tools' | 'settings' | 'team' | 'profile';
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export default function AdminSidebar({ activePage }: AdminSidebarProps) {
+export default function AdminSidebar({ activePage, isOpen = false, onClose }: AdminSidebarProps) {
   const navigate = useNavigate();
   const { adminProfile } = useAuth();
   const [showLogout, setShowLogout] = useState(false);
@@ -17,8 +19,23 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
   };
 
   return (
-    <aside className="h-screen w-64 fixed left-0 top-0 border-r border-white/10 bg-white/[0.02] backdrop-blur-2xl flex flex-col py-8 z-50">
-      <div className="px-8 mb-12 flex flex-col items-start gap-4">
+    <>
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 md:hidden"
+          onClick={onClose}
+        />
+      )}
+      <aside className={`h-screen w-64 fixed left-0 top-0 border-r border-white/10 bg-[#050505] md:bg-white/[0.02] backdrop-blur-2xl flex flex-col py-8 z-50 transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        {isOpen && (
+          <button 
+            onClick={onClose}
+            className="md:hidden absolute top-6 right-6 text-white/50 hover:text-white"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        )}
+        <div className="px-8 mb-12 flex flex-col items-start gap-4">
         <div className="flex items-center gap-4">
           <img 
             className="h-8 object-contain logo-transparent" 
@@ -168,6 +185,7 @@ export default function AdminSidebar({ activePage }: AdminSidebarProps) {
           </button>
         </div>
       </nav>
-    </aside>
+      </aside>
+    </>
   );
 }

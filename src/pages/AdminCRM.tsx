@@ -11,6 +11,7 @@ import { LeadColhido, LeadStatus, NICHOS } from '../types/lead';
 export default function AdminCRM() {
   const [leads, setLeads] = useState<LeadColhido[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
@@ -232,9 +233,9 @@ export default function AdminCRM() {
         </div>
       </div>
 
-      <AdminSidebar activePage="dashboard" />
+      <AdminSidebar activePage="dashboard" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="ml-64 flex-1 min-h-screen relative flex flex-col">
+      <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
         <header className="w-full h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10 shrink-0">
           <GlobalSearch />
           <div className="flex items-center gap-6">

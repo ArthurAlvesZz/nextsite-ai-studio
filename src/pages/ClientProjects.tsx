@@ -11,6 +11,7 @@ export default function ClientProjects() {
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('Todos');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     let unsubscribeDemands: () => void;
@@ -117,15 +118,19 @@ export default function ClientProjects() {
 
   return (
     <div className="bg-[#050505] text-white font-body antialiased min-h-screen flex selection:bg-secondary selection:text-on-secondary">
-      <ClientSidebar activePage="projects" />
+      <ClientSidebar activePage="projects" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <div className="flex-1 flex flex-col ml-64 relative">
-        <div className="fixed bottom-0 right-0 w-[800px] h-[800px] bg-secondary/5 blur-[150px] rounded-full -z-10 pointer-events-none"></div>
-        <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
+      <div className="flex-1 flex flex-col md:ml-64 relative w-full overflow-hidden">
+        <div className="fixed bottom-0 right-0 w-[400px] md:w-[800px] h-[400px] md:h-[800px] bg-secondary/5 blur-[100px] md:blur-[150px] rounded-full -z-10 pointer-events-none"></div>
+        <div className="fixed top-0 right-0 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-primary/5 blur-[80px] md:blur-[120px] rounded-full -z-10 pointer-events-none"></div>
 
-        <ClientTopbar title="Projetos" subtitle="Gerencie suas produções em tempo real." />
+        <ClientTopbar 
+          title="Projetos" 
+          subtitle="Gerencie suas produções em tempo real." 
+          onMenuClick={() => setIsSidebarOpen(true)}
+        />
 
-        <main className="p-12 space-y-16 max-w-7xl mx-auto w-full">
+        <main className="p-6 md:p-12 space-y-12 md:space-y-16 max-w-7xl mx-auto w-full">
           <div className="flex justify-between items-end mb-10">
             <div>
               <h2 className="text-5xl font-black tracking-tighter mb-4 font-headline">Meus Projetos</h2>

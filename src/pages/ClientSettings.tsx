@@ -14,6 +14,7 @@ export default function ClientSettings() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Form states
   const [name, setName] = useState('');
@@ -171,15 +172,19 @@ export default function ClientSettings() {
 
   return (
     <div className="bg-[#050505] text-white font-body antialiased min-h-screen flex selection:bg-secondary selection:text-on-secondary">
-      <ClientSidebar activePage="settings" />
+      <ClientSidebar activePage="settings" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <div className="flex-1 flex flex-col ml-64 relative">
-        <div className="fixed bottom-0 right-0 w-[800px] h-[800px] bg-secondary/5 blur-[150px] rounded-full -z-10 pointer-events-none"></div>
-        <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
+      <div className="flex-1 flex flex-col md:ml-64 relative w-full overflow-hidden">
+        <div className="fixed bottom-0 right-0 w-[400px] md:w-[800px] h-[400px] md:h-[800px] bg-secondary/5 blur-[100px] md:blur-[150px] rounded-full -z-10 pointer-events-none"></div>
+        <div className="fixed top-0 right-0 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-primary/5 blur-[80px] md:blur-[120px] rounded-full -z-10 pointer-events-none"></div>
 
-        <ClientTopbar title="Configurações" subtitle="Gerencie seu perfil e preferências." />
+        <ClientTopbar 
+          title="Configurações" 
+          subtitle="Gerencie seu perfil e preferências." 
+          onMenuClick={() => setIsSidebarOpen(true)}
+        />
 
-        <main className="p-12 space-y-16 max-w-5xl mx-auto w-full">
+        <main className="p-6 md:p-12 space-y-10 md:space-y-16 max-w-5xl mx-auto w-full">
           <header className="mb-12">
             <h2 className="text-5xl font-black tracking-tighter text-white mb-4 font-headline uppercase">Configurações da Conta</h2>
             <p className="text-white/30 text-sm font-medium uppercase tracking-widest">Gerencie suas preferências de produção e segurança da Next Creatives.</p>
@@ -198,9 +203,9 @@ export default function ClientSettings() {
           <div className="space-y-10">
             {/* Section 1: Perfil do Cliente */}
             <section className="bg-white/[0.01] backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-10">
-              <div className="flex items-center justify-between mb-10">
-                <div className="flex items-center gap-8">
-                  <div className="relative group">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-10">
+                <div className="flex flex-col md:flex-row items-center gap-6 md:gap-8">
+                  <div className="relative group mx-auto md:mx-0">
                     <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-white/5 bg-gradient-to-br from-secondary/20 to-primary/20 flex items-center justify-center text-white font-headline font-black text-3xl">
                       {avatarUrl ? (
                         <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
@@ -215,20 +220,20 @@ export default function ClientSettings() {
                       <span className="material-symbols-outlined text-sm">edit</span>
                     </button>
                   </div>
-                  <div>
+                  <div className="text-center md:text-left">
                     <h3 className="text-2xl font-black text-white font-headline tracking-tighter">Perfil do Cliente</h3>
-                    <p className="text-sm text-white/30 font-medium">Atualize suas informações pessoais e corporativas.</p>
+                    <p className="text-sm text-white/30 font-medium">Atualize suas informações corporativas.</p>
                   </div>
                 </div>
                 <button 
                   onClick={handleAvatarChange}
-                  className="px-8 py-3 rounded-xl border border-white/10 text-[10px] font-black uppercase tracking-widest hover:bg-white/5 transition-all"
+                  className="w-full md:w-auto px-8 py-3 rounded-xl border border-white/10 text-[10px] font-black uppercase tracking-widest hover:bg-white/5 transition-all"
                 >
                   Alterar Foto
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
                 <div className="space-y-3">
                   <label className="text-[10px] font-black uppercase tracking-[0.3em] text-white/30 ml-1 font-headline">Nome Completo</label>
                   <input 

@@ -12,6 +12,30 @@ export default function ClientPurchases() {
   const [loading, setLoading] = useState(true);
   const [totalInvested, setTotalInvested] = useState(0);
   const [filter, setFilter] = useState('Todos');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+
+  const handleCheckout = async (planId: string) => {
+    setCheckoutLoading(planId);
+    try {
+      // Mocked Backend API Call (Waiting for real endpoint)
+      await fetch('https://api.nextcreatives.co/payments/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId, clientId: auth.currentUser?.uid })
+      });
+      // Simulate API delay
+      await new Promise(r => setTimeout(r, 1500));
+      // In production, the backend returns a real checkout URL here
+      const mockCheckoutUrl = "https://checkout.stripe.com/pay/mock_session_" + planId;
+      window.open(mockCheckoutUrl, '_blank');
+    } catch (err) {
+      console.error("Erro ao iniciar checkout", err);
+      alert("Erro ao processar pagamento. Verifique a conexão.");
+    } finally {
+      setCheckoutLoading(null);
+    }
+  };
 
   useEffect(() => {
     let unsubscribeSales: () => void;
@@ -85,15 +109,19 @@ export default function ClientPurchases() {
 
   return (
     <div className="bg-[#050505] text-white font-body antialiased min-h-screen flex selection:bg-secondary selection:text-on-secondary">
-      <ClientSidebar activePage="purchases" />
+      <ClientSidebar activePage="purchases" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <div className="flex-1 flex flex-col ml-64 relative">
-        <div className="fixed bottom-0 right-0 w-[800px] h-[800px] bg-secondary/5 blur-[150px] rounded-full -z-10 pointer-events-none"></div>
-        <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
+      <div className="flex-1 flex flex-col md:ml-64 relative w-full overflow-hidden">
+        <div className="fixed bottom-0 right-0 w-[400px] md:w-[800px] h-[400px] md:h-[800px] bg-secondary/5 blur-[100px] md:blur-[150px] rounded-full -z-10 pointer-events-none"></div>
+        <div className="fixed top-0 right-0 w-[300px] md:w-[500px] h-[300px] md:h-[500px] bg-primary/5 blur-[80px] md:blur-[120px] rounded-full -z-10 pointer-events-none"></div>
 
-        <ClientTopbar title="Finanças" subtitle="Histórico de investimentos e pacotes." />
+        <ClientTopbar 
+          title="Finanças" 
+          subtitle="Histórico de investimentos e pacotes." 
+          onMenuClick={() => setIsSidebarOpen(true)}
+        />
 
-        <main className="p-12 space-y-16 max-w-7xl mx-auto w-full">
+        <main className="p-6 md:p-12 space-y-12 md:space-y-16 max-w-7xl mx-auto w-full">
           <section className="mb-16">
             <h2 className="text-5xl font-black tracking-tighter text-white mb-6 font-headline">Meus Pacotes</h2>
             <p className="text-white/30 text-sm max-w-2xl leading-relaxed font-medium">Acompanhe seu histórico de investimentos e pacotes de vídeos contratados. Gerencie seus recibos e visualize o status de cada transação em tempo real.</p>
@@ -218,18 +246,97 @@ export default function ClientPurchases() {
             </div>
           </div>
 
-          <div className="grid grid-cols-12 gap-10">
-            <div className="col-span-12 lg:col-span-7 h-80 relative rounded-[2.5rem] overflow-hidden group cursor-pointer border border-white/5">
-              <img className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110 opacity-40" src="https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=1200" alt="Upgrade" />
-              <div className="absolute inset-0 bg-gradient-to-r from-[#050505] via-[#050505]/80 to-transparent p-12 flex flex-col justify-center">
-                <span className="text-secondary text-[10px] font-black uppercase tracking-[0.4em] mb-4">Upgrade Disponível</span>
-                <h3 className="text-4xl font-black text-white mb-8 leading-tight font-headline tracking-tighter">Mude para o plano Unlimited<br/>e economize 30%</h3>
-                <div>
-                  <button className="px-10 py-5 bg-white text-black rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] hover:bg-secondary hover:text-white transition-all duration-500 shadow-2xl shadow-black">Saiba Mais</button>
+          <section className="mt-20">
+            <h3 className="text-3xl font-black text-white mb-2 font-headline tracking-tighter">Pacotes de Vídeos</h3>
+            <p className="text-white/30 text-sm mb-10 font-medium">Escolha o pacote ideal para sua próxima janela de produções.</p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {/* Plan 1 */}
+              <div className="bg-white/[0.01] backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-10 flex flex-col hover:bg-white/[0.03] transition-all duration-500">
+                <span className="text-white/30 text-[10px] font-black uppercase tracking-widest mb-4">Essencial</span>
+                <h4 className="text-4xl font-black text-white font-headline tracking-tighter mb-4 border-b border-white/5 pb-6">Start</h4>
+                <ul className="space-y-4 mb-8 flex-1">
+                  <li className="flex items-center gap-3 text-sm text-white/70">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> 2 Vídeos Originais
+                  </li>
+                  <li className="flex items-center gap-3 text-sm text-white/70">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> Formato Reels/TikTok
+                  </li>
+                  <li className="flex items-center gap-3 text-sm text-white/70">
+                    <span className="material-symbols-outlined text-white/20 text-sm">check_circle</span> Entrega em 5 dias
+                  </li>
+                </ul>
+                <div className="mb-8">
+                  <span className="text-3xl font-black text-white font-headline tracking-tighter">R$ 1.800</span>
                 </div>
+                <button 
+                  onClick={() => handleCheckout('plan_start')}
+                  disabled={checkoutLoading !== null}
+                  className="w-full py-4 rounded-xl border border-white/10 text-[10px] font-black uppercase tracking-[0.3em] hover:bg-white/10 transition-all disabled:opacity-50"
+                >
+                  {checkoutLoading === 'plan_start' ? 'Processando...' : 'Assinar Plano'}
+                </button>
+              </div>
+
+              {/* Plan 2 */}
+              <div className="bg-gradient-to-br from-secondary/10 to-primary/5 backdrop-blur-3xl border border-secondary/20 rounded-[2.5rem] p-10 flex flex-col relative transform md:-translate-y-4 shadow-2xl shadow-secondary/5">
+                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-secondary text-black px-4 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.2em]">Mais Popular</div>
+                <span className="text-secondary text-[10px] font-black uppercase tracking-widest mb-4">Acelerado</span>
+                <h4 className="text-4xl font-black text-white font-headline tracking-tighter mb-4 border-b border-white/10 pb-6">Growth</h4>
+                <ul className="space-y-4 mb-8 flex-1">
+                  <li className="flex items-center gap-3 text-sm text-white/90">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> 5 Vídeos Originais
+                  </li>
+                  <li className="flex items-center gap-3 text-sm text-white/90">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> Formato Reels/TikTok
+                  </li>
+                  <li className="flex items-center gap-3 text-sm text-white/90">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> Entrega prioritária (3 dias)
+                  </li>
+                </ul>
+                <div className="mb-8">
+                  <span className="text-3xl font-black text-white font-headline tracking-tighter">R$ 3.500</span>
+                </div>
+                <button 
+                  onClick={() => handleCheckout('plan_growth')}
+                  disabled={checkoutLoading !== null}
+                  className="w-full py-4 rounded-xl bg-secondary text-on-secondary text-[10px] font-black uppercase tracking-[0.3em] hover:bg-opacity-90 transition-all shadow-xl shadow-secondary/20 disabled:opacity-50"
+                >
+                  {checkoutLoading === 'plan_growth' ? 'Processando...' : 'Assinar Plano'}
+                </button>
+              </div>
+
+              {/* Plan 3 */}
+              <div className="bg-white/[0.01] backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-10 flex flex-col hover:bg-white/[0.03] transition-all duration-500">
+                <span className="text-white/30 text-[10px] font-black uppercase tracking-widest mb-4">Escala</span>
+                <h4 className="text-4xl font-black text-white font-headline tracking-tighter mb-4 border-b border-white/5 pb-6">Scale</h4>
+                <ul className="space-y-4 mb-8 flex-1">
+                  <li className="flex items-center gap-3 text-sm text-white/70">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> 10 Vídeos Originais
+                  </li>
+                  <li className="flex items-center gap-3 text-sm text-white/70">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> Múltiplos Formatos
+                  </li>
+                  <li className="flex items-center gap-3 text-sm text-white/70">
+                    <span className="material-symbols-outlined text-secondary text-sm">check_circle</span> Edição Dinâmica Completa
+                  </li>
+                </ul>
+                <div className="mb-8">
+                  <span className="text-3xl font-black text-white font-headline tracking-tighter">R$ 6.000</span>
+                </div>
+                <button 
+                  onClick={() => handleCheckout('plan_scale')}
+                  disabled={checkoutLoading !== null}
+                  className="w-full py-4 rounded-xl border border-white/10 text-[10px] font-black uppercase tracking-[0.3em] hover:bg-white/10 transition-all disabled:opacity-50"
+                >
+                  {checkoutLoading === 'plan_scale' ? 'Processando...' : 'Assinar Plano'}
+                </button>
               </div>
             </div>
-            <div className="col-span-12 lg:col-span-5 bg-white/[0.01] backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-12 flex flex-col justify-between hover:bg-white/[0.02] transition-all duration-700">
+          </section>
+
+          <div className="grid grid-cols-12 gap-10 mt-16">
+            <div className="col-span-12 bg-white/[0.01] backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-12 flex flex-col justify-between hover:bg-white/[0.02] transition-all duration-700">
               <div>
                 <h4 className="text-3xl font-black text-white mb-4 font-headline tracking-tighter">Precisa de suporte?</h4>
                 <p className="text-white/30 text-sm leading-relaxed font-medium">Nossa equipe financeira está disponível para tirar dúvidas sobre seus pagamentos ou faturamento corporativo.</p>

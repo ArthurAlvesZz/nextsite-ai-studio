@@ -14,6 +14,7 @@ export default function AdminProfile() {
   const { goalSettings } = useGoalSettings();
   const { teamMembers } = useEmployees();
   const [isLinking, setIsLinking] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [whatsappStatus, setWhatsappStatus] = useState<'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready'>('disconnected');
   const [whatsappQR, setWhatsappQR] = useState<string | null>(null);
   const [whatsappUser, setWhatsappUser] = useState<any>(null);
@@ -192,11 +193,12 @@ export default function AdminProfile() {
         </div>
       </div>
 
-      <AdminSidebar activePage="profile" />
+      <AdminSidebar activePage="profile" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="ml-64 flex-1 min-h-screen relative">
+      <main className="md:ml-64 w-full flex-1 min-h-screen relative">
         {/* Top Bar */}
-        <header className="fixed top-0 right-0 w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10">
+        <header className="fixed top-0 right-0 w-full md:w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10">
+          <button className="md:hidden text-white/70 hover:text-white shrink-0 mr-4" onClick={() => setIsSidebarOpen(true)}><span className="material-symbols-outlined text-2xl">menu</span></button>
           <GlobalSearch />
           <div className="flex items-center gap-6">
             <button className="relative text-white/60 hover:text-white transition-colors">

@@ -12,6 +12,7 @@ export default function AdminClients() {
   const { clients, addClient, deleteClient, updateClient } = useClients();
   const [searchParams, setSearchParams] = useSearchParams();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
@@ -138,12 +139,13 @@ export default function AdminClients() {
         </div>
       </div>
 
-      <AdminSidebar activePage="clientes" />
+      <AdminSidebar activePage="clientes" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}
-      <main className="ml-64 flex-1 min-h-screen relative flex flex-col">
+      <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
         {/* TopNavBar */}
-        <header className="fixed top-0 right-0 w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10">
+        <header className="fixed top-0 right-0 w-full md:w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10">
+          <button className="md:hidden text-white/70 hover:text-white shrink-0 mr-4" onClick={() => setIsSidebarOpen(true)}><span className="material-symbols-outlined text-2xl">menu</span></button>
           <GlobalSearch />
           <div className="flex items-center gap-6">
             <button className="relative text-white/60 hover:text-white transition-colors" onClick={() => alert('Notificações em breve')}>

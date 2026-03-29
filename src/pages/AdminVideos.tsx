@@ -15,6 +15,7 @@ export default function AdminVideos() {
   
   const [selectedVideo, setSelectedVideo] = useState<VideoDemand | null>(null);
   const [isNewDemandModalOpen, setIsNewDemandModalOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
   const [finalizeVideoUrl, setFinalizeVideoUrl] = useState('');
@@ -242,10 +243,10 @@ export default function AdminVideos() {
         </div>
       </div>
 
-      <AdminSidebar activePage="videos" />
+      <AdminSidebar activePage="videos" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}
-      <main className="ml-64 flex-1 min-h-screen relative flex flex-col">
+      <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
         {/* Top Bar */}
         <header className="h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10 shrink-0">
           <div className="flex items-center gap-6">

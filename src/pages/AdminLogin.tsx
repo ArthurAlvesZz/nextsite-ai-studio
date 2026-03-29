@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
@@ -11,6 +11,37 @@ export default function AdminLogin() {
   const [error, setError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const navigate = useNavigate();
+
+  // Forgot password states
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail) return;
+    setForgotLoading(true);
+    setForgotMessage('');
+    try {
+      // Mocked Backend API Call (Waiting for real endpoint)
+      await fetch('https://api.nextcreatives.co/auth/forgot-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email: forgotEmail })
+      });
+      // Simulate network delay
+      await new Promise(r => setTimeout(r, 1000));
+      setForgotMessage('E-mail de recuperação enviado com sucesso!');
+      setForgotEmail('');
+    } catch (err) {
+      setForgotMessage('Erro ao enviar e-mail. Tente novamente.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
 
   const handleGoogleLogin = async () => {
     setIsLoggingIn(true);
@@ -242,11 +273,75 @@ export default function AdminLogin() {
               <img src="https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png" alt="Google" className="h-4 object-contain" />
               <span className="font-headline font-bold uppercase text-[10px] tracking-widest">Entrar com Google</span>
             </button>
+            <div className="flex justify-center text-[10px] font-headline font-bold uppercase tracking-widest text-white/40 pt-2">
+              <button type="button" onClick={() => setShowForgotModal(true)} className="hover:text-secondary transition-colors">Recuperar Senha</button>
+            </div>
           </form>
         </div>
       </main>
 
       {/* Footer removed */}
+
+      {/* Forgot Password Modal */}
+      <AnimatePresence>
+        {showForgotModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowForgotModal(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] p-10 shadow-2xl"
+            >
+              <h3 className="text-2xl font-black text-white font-headline tracking-tighter mb-2">Recuperar Senha</h3>
+              <p className="text-sm text-white/30 font-medium mb-8">Digite seu e-mail administrativo para receber um link de recuperação.</p>
+              
+              <form onSubmit={handleForgotPassword} className="space-y-6">
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black uppercase tracking-[0.3em] text-white/30 ml-1 font-headline">E-mail</label>
+                  <input 
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full bg-white/[0.02] border border-white/5 rounded-2xl p-5 text-sm text-white focus:ring-1 focus:ring-secondary transition-all outline-none" 
+                    type="email" 
+                    placeholder="admin@nextcreatives.co"
+                    required
+                  />
+                </div>
+                
+                {forgotMessage && (
+                  <p className={`text-[10px] font-bold uppercase tracking-widest text-center ${forgotMessage.includes('Erro') ? 'text-error' : 'text-secondary'}`}>
+                    {forgotMessage}
+                  </p>
+                )}
+
+                <div className="flex gap-4 pt-4">
+                  <button 
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="flex-1 px-6 py-4 rounded-xl text-[10px] font-black text-white/30 hover:text-white transition-all uppercase tracking-[0.3em]"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="flex-1 bg-white text-black px-6 py-4 rounded-xl text-[10px] font-black uppercase tracking-[0.3em] hover:bg-secondary hover:text-white transition-all duration-500 disabled:opacity-50"
+                  >
+                    {forgotLoading ? 'Enviando...' : 'Enviar Link'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
