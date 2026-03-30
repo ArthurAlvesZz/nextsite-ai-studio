@@ -20,6 +20,7 @@ import ClientSettings from './pages/ClientSettings';
 import AdminProfile from './pages/AdminProfile';
 import ProtectedRoute from './components/ProtectedRoute';
 import ClientProtectedRoute from './components/ClientProtectedRoute';
+import SEO from './components/SEO';
 import { motion, useScroll, useTransform, AnimatePresence } from 'motion/react';
 import { useAgencySettings } from './hooks/useAgencySettings';
 import gsap from 'gsap';
@@ -121,6 +122,7 @@ function MainApp() {
 
   return (
     <div className="font-body selection:bg-primary selection:text-on-primary min-h-screen bg-transparent text-on-background relative">
+      <SEO title="Vídeos com IA para o seu Negócio" />
       {/* Main Content */}
       <div id="main-content" className={`transition-opacity duration-1000 ${isReady ? 'opacity-100' : 'opacity-0'}`}>
         <ImmersiveBackground />
@@ -131,37 +133,12 @@ function MainApp() {
           <Transformation settings={settings} />
           <Workflow settings={settings} />
           <Pricing />
-          <Footer />
         </div>
       </div>
     </div>
   );
 }
 
-function Footer() {
-  return (
-    <footer className="py-12 border-t border-white/10 bg-[#020202] relative z-10">
-      <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <img 
-            alt="Next Creatives Corporate Logo" 
-            className="h-8 object-contain logo-transparent opacity-50 hover:opacity-100 transition-opacity" 
-            src="/logo.png"
-            referrerPolicy="no-referrer"
-          />
-          <span className="text-white/30 text-xs font-light">© {new Date().getFullYear()} Next Creatives. All rights reserved.</span>
-        </div>
-        
-        <div className="flex items-center gap-6">
-          <Link to="/admin" className="text-white/30 hover:text-secondary text-xs font-light transition-colors flex items-center gap-2">
-            <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
-            Admin Access
-          </Link>
-        </div>
-      </div>
-    </footer>
-  );
-}
 
 function ImmersiveBackground() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -1361,11 +1338,13 @@ function Pricing() {
 }
 
 import { PresenceProvider } from './hooks/usePresence';
+import { WhatsappProvider } from './contexts/WhatsappContext';
 
 export default function App() {
   return (
     <BrowserRouter>
-      <PresenceProvider>
+      <WhatsappProvider>
+        <PresenceProvider>
         <Routes>
           <Route path="/" element={<MainApp />} />
           <Route path="/admin" element={<AdminLogin />} />
@@ -1392,6 +1371,7 @@ export default function App() {
           <Route path="/admin/team/:id" element={<ProtectedRoute><EmployeeProfile /></ProtectedRoute>} />
         </Routes>
       </PresenceProvider>
-    </BrowserRouter>
-  );
+    </WhatsappProvider>
+  </BrowserRouter>
+);
 }

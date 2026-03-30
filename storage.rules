@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── Avatar uploads ────────────────────────────────────────────────────────
+    // Users can only upload to their own folder: avatars/{uid}/*
+    // Max file size: 5 MB. Allowed types: image/jpeg, image/png, image/webp.
+    match /avatars/{uid}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.size <= 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    // ── Block everything else by default ─────────────────────────────────────
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

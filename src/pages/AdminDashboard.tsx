@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
-import { usePageTitle } from '../hooks/usePageTitle';
+import SEO from '../components/SEO';
 import { useSales, Sale } from '../hooks/useSales';
 import { useClients } from '../hooks/useClients';
 import { useDemands } from '../hooks/useDemands';
@@ -37,7 +37,7 @@ import { ptBR } from 'date-fns/locale';
 type TimeFilter = 'today' | '7d' | '14d' | '1m' | '6m' | 'custom';
 
 export default function AdminDashboard() {
-  usePageTitle('Dashboard Geral');
+  const title = 'Dashboard Geral';
 
   const { sales } = useSales();
   const { clients } = useClients();
@@ -265,6 +265,7 @@ export default function AdminDashboard() {
   return (
     <ErrorBoundary>
       <div className="font-body text-on-background min-h-screen flex bg-[#050505] overflow-hidden selection:bg-primary/30">
+      <SEO title={title} />
       {/* Background from Home */}
       <div className="fixed inset-0 w-full h-full -z-10 bg-[#050505] overflow-hidden">
         <div className="absolute inset-0 w-full h-full opacity-1 bg-gradient-to-b from-[#020202] to-transparent">

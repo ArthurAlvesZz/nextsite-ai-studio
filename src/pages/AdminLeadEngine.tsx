@@ -7,7 +7,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Filter, Download, MoreHorizontal, ArrowUpRight, ChevronRight, Zap, Users, Target, BarChart3, MessageSquare, Phone, Mail, Globe, MapPin, Calendar, Clock, CheckCircle2, AlertCircle, Loader2, Settings, TrendingUp, PieChart as PieChartIcon, Briefcase, Star, ShoppingBag, Megaphone, Send, Plus, Activity, Cpu, Zap as Bolt, X, Info, ChevronDown, MessageCircle } from 'lucide-react';
 import { LeadColhido } from '../types/lead';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
-import { getScraperStats, ScraperStats } from '../services/scrapersService';
+import { ScraperStats } from '../services/scrapersService';
+import { onSnapshot, doc } from 'firebase/firestore';
+import SEO from '../components/SEO';
 
 const leadInflowData = [
   { date: '01/03', leads: 45 },
@@ -186,13 +188,20 @@ export default function AdminLeadEngine() {
   }, [activeTab]);
 
   useEffect(() => {
-    const simulateScraperUpdate = async () => {
-      const stats = await getScraperStats();
-      setScraperStats(stats);
-    };
+    const unsub = onSnapshot(doc(db, 'scraper_metadata', 'stats'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setScraperStats(prev => ({
+          ...prev,
+          shopify: { ...prev.shopify, ...data.shopify },
+          adLibrary: { ...prev.adLibrary, ...data.adLibrary },
+          telegram: { ...prev.telegram, ...data.telegram },
+          global: { ...prev.global, ...data.global }
+        }));
+      }
+    });
 
-    const interval = setInterval(simulateScraperUpdate, 5000);
-    return () => clearInterval(interval);
+    return () => unsub();
   }, []);
 
   const templates = {
@@ -395,6 +404,7 @@ export default function AdminLeadEngine() {
 
   return (
     <div className="min-h-screen bg-[#020202] text-white font-body selection:bg-secondary selection:text-on-secondary flex">
+      <SEO title="Motor de Leads" />
       <AdminSidebar activePage="tools" />
 
       <main className="ml-64 flex-1 min-h-screen relative flex flex-col">

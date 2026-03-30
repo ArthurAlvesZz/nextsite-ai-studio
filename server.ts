@@ -10,7 +10,7 @@ import { initializeApp } from "firebase/app";
 import admin from "firebase-admin";
 import fs from "fs";
 import QRCode from "qrcode";
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore, BufferJSON, AuthenticationCreds, initAuthCreds, SignalDataTypeMap } from "@whiskeysockets/baileys";
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore, BufferJSON, AuthenticationCreds, initAuthCreds, SignalDataTypeMap } from "@whiskeysockets/baileys";
 import pino from "pino";
 import nodemailer from "nodemailer";
 import { runVideoPipeline, initializeCronJob } from "./services/automation/orchestratorService.js";
@@ -19,6 +19,186 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ── Named application logger ──────────────────────────────────────────────────
+// Use LOG_LEVEL=debug for verbose output. Default: info.
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  base: { service: 'nextcreatives-server' },
+});
+
+// ── Per-user rate limiting (Firestore-backed, in-memory cached) ───────────────
+//
+// Architecture:
+//  1. IP-based express-rate-limit  → first gate, no DB needed, blocks bots fast
+//  2. requireAdmin middleware      → verifies Firebase JWT, sets req.user.uid
+//  3. createUserRateLimiter(action)→ second gate, per-uid sliding window (1 hour)
+//  4. checkCircuitBreaker(action)  → third gate, global counter; opens on abuse
+//
+// Firestore doc: rateLimits/{uid}  → { [action]: { count, windowStart } }
+// In-memory cache (30s TTL) prevents a Firestore read on every single request.
+
+const USER_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour sliding window
+const USER_RATE_CACHE_TTL_MS = 30_000;       // re-read Firestore every 30s at most
+
+// Per-user limits (requests per hour, per uid)
+const USER_LIMITS: Record<string, number> = {
+  transcribe:     30,   // 30 Whisper/Groq calls per user/hour
+  video_pipeline: 5,    // 5 HeyGen renders per user/hour
+  lead_search:    20,   // 20 Google Custom Search calls per user/hour
+  whatsapp_send:  120,  // 120 WhatsApp sends per user/hour
+};
+
+// Global circuit-breaker thresholds (all users combined, per hour)
+const CIRCUIT_THRESHOLDS: Record<string, number> = {
+  transcribe:     200,  // if >200 transcriptions/hr across all users → 503
+  video_pipeline: 30,   // if >30 video renders/hr globally → 503
+  lead_search:    150,  // if >150 lead searches/hr globally → 503
+  whatsapp_send:  1000, // if >1000 WA sends/hr globally → 503
+};
+
+interface UserRateCacheEntry {
+  count: number;
+  windowStart: number; // epoch ms
+  lastCached: number;  // epoch ms — cache freshness timestamp
+}
+
+interface CircuitEntry {
+  count: number;
+  windowStart: number;
+  isOpen: boolean;
+}
+
+// In-memory stores (reset on server restart — intentional for circuit breaker)
+const userRateCache  = new Map<string, UserRateCacheEntry>();
+const circuitState   = new Map<string, CircuitEntry>();
+
+/**
+ * checkCircuitBreaker — increments the global counter for an action.
+ * Returns true (circuit open) if the threshold is exceeded → caller sends 503.
+ */
+function checkCircuitBreaker(action: string): boolean {
+  const threshold = CIRCUIT_THRESHOLDS[action];
+  if (!threshold) return false;
+
+  const now = Date.now();
+  let entry = circuitState.get(action);
+
+  // Reset window if expired
+  if (!entry || now - entry.windowStart > USER_RATE_WINDOW_MS) {
+    entry = { count: 0, windowStart: now, isOpen: false };
+    circuitState.set(action, entry);
+  }
+
+  // Circuit already open — don't reset until window expires
+  if (entry.isOpen) return true;
+
+  entry.count++;
+
+  if (entry.count > threshold) {
+    entry.isOpen = true;
+    logger.warn(
+      { action, globalCount: entry.count, threshold, event: 'CIRCUIT_BREAKER_OPEN' },
+      `Circuit breaker opened for action "${action}" (${entry.count}/${threshold} req/hr globally)`
+    );
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * createUserRateLimiter — middleware factory.
+ * Must be placed AFTER requireAdmin (needs req.user.uid).
+ *
+ * Flow:
+ *  1. Circuit breaker check (in-memory, fast)
+ *  2. Memory cache check (stale after 30s → reads Firestore)
+ *  3. Limit check → 429 if exceeded
+ *  4. Increment counter → async write-through to Firestore (non-blocking)
+ */
+function createUserRateLimiter(action: string) {
+  const maxRequests = USER_LIMITS[action] ?? 20;
+
+  return async (req: any, res: any, next: any) => {
+    const uid: string | undefined = req.user?.uid;
+    if (!uid) return next(); // requireAdmin already blocked unauthenticated requests
+
+    // ── Gate 1: Global circuit breaker ──────────────────────────────────────
+    if (checkCircuitBreaker(action)) {
+      logger.warn(
+        { uid, action, event: 'CIRCUIT_BREAKER_REJECTED' },
+        `Request rejected — circuit breaker open for "${action}"`
+      );
+      return res.status(503).json({
+        error: 'Serviço temporariamente suspenso por manutenção de segurança de custos. Tente novamente em alguns minutos.',
+        retryAfter: 60
+      });
+    }
+
+    // ── Gate 2: Per-user sliding window ─────────────────────────────────────
+    const cacheKey = `${uid}:${action}`;
+    const now = Date.now();
+    let entry = userRateCache.get(cacheKey);
+    const cacheStale = !entry || (now - entry.lastCached) > USER_RATE_CACHE_TTL_MS;
+
+    if (cacheStale) {
+      try {
+        const docSnap = await admin.firestore().collection('rateLimits').doc(uid).get();
+        const stored = docSnap.data()?.[action] as { count: number; windowStart: number } | undefined;
+
+        if (stored && (now - stored.windowStart) < USER_RATE_WINDOW_MS) {
+          entry = { count: stored.count, windowStart: stored.windowStart, lastCached: now };
+        } else {
+          // Window expired in Firestore or no record — start fresh
+          entry = { count: 0, windowStart: now, lastCached: now };
+        }
+        userRateCache.set(cacheKey, entry);
+      } catch (err) {
+        // Fail open on Firestore error — log but don't block legitimate users
+        logger.error({ uid, action, err, event: 'RATE_LIMIT_FIRESTORE_READ_ERROR' },
+          'Firestore read failed in user rate limiter — failing open');
+        return next();
+      }
+    }
+
+    // Reset if local window also expired
+    if (now - entry.windowStart > USER_RATE_WINDOW_MS) {
+      entry = { count: 0, windowStart: now, lastCached: now };
+      userRateCache.set(cacheKey, entry);
+    }
+
+    // ── Limit check ─────────────────────────────────────────────────────────
+    if (entry.count >= maxRequests) {
+      const retryAfterSec = Math.ceil((USER_RATE_WINDOW_MS - (now - entry.windowStart)) / 1000);
+      logger.warn(
+        { uid, action, count: entry.count, limit: maxRequests, retryAfterSec, event: 'USER_RATE_LIMIT_EXCEEDED' },
+        `User "${uid}" exceeded rate limit for "${action}" (${entry.count}/${maxRequests} req/hr)`
+      );
+      return res.status(429).json({
+        error: `Limite horário de "${action}" atingido (${maxRequests} req/hora por usuário). Aguarde antes de tentar novamente.`,
+        retryAfter: retryAfterSec
+      });
+    }
+
+    // ── Increment + async write-through to Firestore ─────────────────────────
+    entry.count++;
+    entry.lastCached = now;
+    userRateCache.set(cacheKey, entry);
+
+    const { count, windowStart } = entry;
+    admin.firestore()
+      .collection('rateLimits')
+      .doc(uid)
+      .set({ [action]: { count, windowStart, updatedAt: Date.now() } }, { merge: true })
+      .catch((err: any) =>
+        logger.error({ uid, action, err, event: 'RATE_LIMIT_FIRESTORE_WRITE_ERROR' },
+          'Async Firestore write failed in user rate limiter')
+      );
+
+    next();
+  };
+}
 
 // Baileys Store
 const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) as any });
@@ -58,50 +238,52 @@ const requireAdmin = async (req: any, res: any, next: any) => {
   console.log(`[Auth] Checking authorization for ${req.method} ${req.url}`);
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.warn(`[Auth] Missing or invalid authorization header for ${req.url}`);
+    logger.warn({ url: req.url, method: req.method, event: 'AUTH_MISSING_TOKEN' },
+      'Missing or invalid authorization header');
     return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
   }
   const token = authHeader.split('Bearer ')[1];
   try {
     const decodedToken = await admin.auth().verifyIdToken(token);
     const uid = decodedToken.uid;
-    console.log(`[Auth] Token verified for UID: ${uid}, Email: ${decodedToken.email}`);
-    
+
     // Check if user is admin or editor using REST API
     const firebaseConfigPath = path.join(__dirname, 'firebase-applet-config.json');
     if (fs.existsSync(firebaseConfigPath)) {
       const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
       const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/users/${uid}`;
-      
+
       const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        headers: { Authorization: `Bearer ${token}` }
       });
-      
+
       if (response.ok) {
         const userData = await response.json();
         const role = userData.fields?.role?.stringValue;
-        console.log(`[Auth] User role from Firestore: ${role}`);
         if (role === 'admin' || role === 'editor') {
           req.user = decodedToken;
           return next();
         }
       } else {
-        console.warn(`[Auth] Failed to fetch user role via REST API: ${response.status} ${response.statusText}`);
+        logger.warn(
+          { uid, url: req.url, status: response.status, event: 'AUTH_ROLE_FETCH_FAILED' },
+          'Failed to fetch user role from Firestore REST API'
+        );
       }
     }
     // Also check if it's the master owner
     if (decodedToken.email === 'arthurfgalves@gmail.com' || decodedToken.email === '15599873676@nextcreatives.co') {
-      console.log(`[Auth] Master owner detected: ${decodedToken.email}`);
       req.user = decodedToken;
       return next();
     }
-    
-    console.warn(`[Auth] Forbidden: User ${decodedToken.email} does not have admin access`);
+
+    logger.warn(
+      { uid, email: decodedToken.email, url: req.url, event: 'AUTH_FORBIDDEN' },
+      'Authenticated user does not have admin/editor access'
+    );
     res.status(403).json({ error: 'Forbidden: Admin access required' });
   } catch (error) {
-    console.error("[Auth] Token verification failed:", error);
+    logger.warn({ url: req.url, event: 'AUTH_INVALID_TOKEN', error }, 'Token verification failed');
     res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 };
@@ -185,6 +367,74 @@ async function startServer() {
   // API Health Check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // SYSTEM LOG — AI Debug Logger
+  // Receives structured error payloads from the Front-End (ErrorBoundary, try/catch).
+  // No auth required: captures errors from unauthenticated sessions too.
+  // Dual write: Pino terminal + Firestore ai_system_logs/{timestamp}_{uid}.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // Rate limiter: 30 log writes / min per IP — prevents log-flood DoS
+  const logLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Log rate limit exceeded.' }
+  });
+
+  app.post("/api/system/log", logLimiter, async (req: any, res: any) => {
+    try {
+      const {
+        level     = 'error',
+        message   = '(no message)',
+        component,
+        stack,
+        context,
+        uid,
+        url,
+        userAgent,
+      } = req.body ?? {};
+
+      // ── Sanitize: cap field lengths to prevent oversized Firestore docs ──
+      const sanitized = {
+        level:     String(level).slice(0, 20),
+        message:   String(message).slice(0, 2000),
+        component: component ? String(component).slice(0, 200) : null,
+        stack:     stack     ? String(stack).slice(0, 5000)    : null,
+        context:   context   ? JSON.parse(JSON.stringify(context)) : null,
+        uid:       uid       ? String(uid).slice(0, 128)        : null,
+        url:       url       ? String(url).slice(0, 500)        : null,
+        userAgent: userAgent ? String(userAgent).slice(0, 300)  : null,
+        serverTs:  Date.now(),
+        env:       process.env.NODE_ENV ?? 'development',
+      };
+
+      // ── 1. Pino terminal (visible in dev + VPS stdout) ───────────────────
+      const pinoLevel = ['error', 'warn', 'info', 'debug'].includes(sanitized.level)
+        ? sanitized.level as 'error' | 'warn' | 'info' | 'debug'
+        : 'error';
+
+      logger[pinoLevel](
+        { event: 'FRONTEND_LOG', ...sanitized },
+        `[FE] ${sanitized.component ?? 'unknown'}: ${sanitized.message}`
+      );
+
+      // ── 2. Firestore: ai_system_logs/{timestamp}_{uid_or_anon} ───────────
+      const docId = `${sanitized.serverTs}_${sanitized.uid ?? 'anon'}`;
+      await admin.firestore()
+        .collection('ai_system_logs')
+        .doc(docId)
+        .set(sanitized);
+
+      res.status(201).json({ ok: true, id: docId });
+    } catch (err: any) {
+      logger.error({ event: 'SYSTEM_LOG_WRITE_ERROR', err: err.message }, 'Failed to write system log');
+      // Always return 201 to the FE — never let logging break the UX
+      res.status(201).json({ ok: false });
+    }
   });
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -547,7 +797,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post("/api/whatsapp/send", waSendLimiter, requireAdmin, async (req: any, res) => {
+  app.post("/api/whatsapp/send", waSendLimiter, requireAdmin, createUserRateLimiter('whatsapp_send'), async (req: any, res) => {
     try {
       const uid = req.user.uid;
       const { phone, message } = req.body;
@@ -569,7 +819,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/whatsapp/transcribe", transcribeLimiter, requireAdmin, async (req: any, res) => {
+  app.post("/api/whatsapp/transcribe", transcribeLimiter, requireAdmin, createUserRateLimiter('transcribe'), async (req: any, res) => {
     try {
       const uid = req.user.uid;
       const { jid, msgId } = req.body;
@@ -628,7 +878,7 @@ async function startServer() {
   });
 
   // Groq Transcription Endpoint (Generic)
-  app.post("/api/transcribe", transcribeLimiter, requireAdmin, async (req, res) => {
+  app.post("/api/transcribe", transcribeLimiter, requireAdmin, createUserRateLimiter('transcribe'), async (req, res) => {
     try {
       const { audioUrl } = req.body;
       if (!audioUrl) {
@@ -676,7 +926,7 @@ async function startServer() {
   });
 
   // API Route: Buscar Leads (New Architecture)
-  app.post("/api/leads/search", leadSearchLimiter, requireAdmin, async (req, res) => {
+  app.post("/api/leads/search", leadSearchLimiter, requireAdmin, createUserRateLimiter('lead_search'), async (req, res) => {
     try {
       const { nicho, uid, savedUrls = [] } = req.body;
       
@@ -917,9 +1167,28 @@ async function startServer() {
       const { spawn } = require('child_process');
       const pythonProcess = spawn('python', ['shopify_scraper.py', inputFilename, '--output', outputFilename], { cwd: scraperDir });
 
+      let processedCount = 0;
+      const totalUrls = urls.length;
+
       pythonProcess.stdout.on('data', (data: any) => {
         const lines = data.toString().split('\n').filter(Boolean);
-        for (const line of lines) res.write(JSON.stringify({ type: 'log', text: line }) + '\n');
+        for (const line of lines) {
+          res.write(JSON.stringify({ type: 'log', text: line }) + '\n');
+          // Python scraper logs "  → store_name | ..." for each completed store
+          if (line.includes(' → ')) {
+            processedCount++;
+            if (processedCount % 50 === 0) {
+              admin.firestore().collection('scraper_metadata').doc('stats').set({
+                shopify: {
+                  totalLeads: processedCount,
+                  queueProgress: Math.round((processedCount / totalUrls) * 100),
+                  lastRun: new Date().toISOString(),
+                  currentStatus: 'running',
+                }
+              }, { merge: true }).catch(() => {});
+            }
+          }
+        }
       });
       pythonProcess.stderr.on('data', (data: any) => {
         const lines = data.toString().split('\n').filter(Boolean);
@@ -927,6 +1196,16 @@ async function startServer() {
       });
 
       pythonProcess.on('close', (code: any) => {
+        // Write final stats to Firestore regardless of exit code
+        admin.firestore().collection('scraper_metadata').doc('stats').set({
+          shopify: {
+            totalLeads: processedCount,
+            queueProgress: 100,
+            lastRun: new Date().toISOString(),
+            currentStatus: 'stopped',
+          }
+        }, { merge: true }).catch(() => {});
+
         try {
           if (fs.existsSync(outputFilename)) {
              const results = JSON.parse(fs.readFileSync(outputFilename, 'utf8'));
@@ -975,7 +1254,7 @@ async function startServer() {
   });
 
   // Manual trigger for Video Automation Pipeline (admin only, fire-and-forget)
-  app.post("/api/automation/video-pipeline/run", requireAdmin, async (req: any, res: any) => {
+  app.post("/api/automation/video-pipeline/run", requireAdmin, createUserRateLimiter('video_pipeline'), async (req: any, res: any) => {
     try {
       const userEmail = req.user?.email;
       console.log(`[Pipeline] Manual trigger by: ${userEmail}`);

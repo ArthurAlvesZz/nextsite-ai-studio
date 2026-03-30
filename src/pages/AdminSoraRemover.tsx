@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import SEO from '../components/SEO';
 import AdminSidebar from '../components/AdminSidebar';
 import { motion } from 'motion/react';
 
@@ -58,6 +59,7 @@ export default function AdminSoraRemover() {
 
   return (
     <div className="min-h-screen bg-[#020202] text-white font-body selection:bg-secondary selection:text-on-secondary flex">
+      <SEO title="Sora Remover" />
       <AdminSidebar activePage="tools" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">

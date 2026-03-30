@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SEO from '../components/SEO';
 import { Link } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
@@ -279,6 +280,7 @@ export default function AdminSettings() {
         </div>
       </div>
 
+      <SEO title="Configurações" />
       <AdminSidebar activePage="settings" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}

@@ -149,6 +149,12 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    match /rateLimits/{userId} {
+      // Written exclusively by the server via Firebase Admin SDK (bypasses these rules).
+      // Block all client-side reads and writes — users must never see or manipulate quota docs.
+      allow read, write: if false;
+    }
+
     match /leadsColhidos/{leadId} {
       // Role-based: admins and editors can manage leads
       // Additionally enforces ownerId isolation: a lead belongs to who created it
@@ -166,6 +172,21 @@ service cloud.firestore {
         !('ownerId' in resource.data) ||
         resource.data.ownerId == request.auth.uid
       );
+    }
+
+    match /rateLimits/{userId} {
+      // Written exclusively by the server via Firebase Admin SDK (bypasses these rules).
+      // Block all client-side reads and writes.
+      allow read, write: if false;
+    }
+
+    match /ai_system_logs/{logId} {
+      // Write-only: captures errors from unauthenticated sessions too.
+      // Server is the real writer (Admin SDK bypasses rules), but this allows
+      // a future direct-client fallback without rule changes.
+      // Reading is PERMANENTLY prohibited from the client — for AI/admin analysis only.
+      allow write: if true;
+      allow read:  if false;
     }
   }
 }

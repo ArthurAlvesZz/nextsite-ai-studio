@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SEO from '../components/SEO';
 import { Link } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import { motion } from 'motion/react';
@@ -41,6 +42,7 @@ export default function AdminTools() {
 
   return (
     <div className="min-h-screen bg-[#020202] text-white font-body selection:bg-secondary selection:text-on-secondary flex">
+      <SEO title="Ferramentas" />
       <AdminSidebar activePage="tools" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
@@ -140,10 +142,6 @@ export default function AdminTools() {
           </section>
         </div>
 
-        {/* Floating Help Button */}
-        <button className="fixed bottom-10 right-10 w-16 h-16 bg-white text-black rounded-full shadow-[0_0_50px_rgba(255,255,255,0.2)] flex items-center justify-center hover:scale-110 transition-transform z-50">
-          <span className="material-symbols-outlined text-2xl">help</span>
-        </button>
       </main>
     </div>
   );

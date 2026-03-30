@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import SEO from '../components/SEO';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import { useEmployees } from '../hooks/useEmployees';
@@ -211,6 +212,7 @@ export default function EmployeeProfile() {
 
   return (
     <div className="min-h-screen bg-[#020202] text-white font-body selection:bg-primary selection:text-on-primary flex">
+      <SEO title="Perfil do Funcionário" />
       <AdminSidebar activePage="team" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">

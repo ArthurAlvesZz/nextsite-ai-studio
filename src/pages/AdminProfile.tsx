@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import SEO from '../components/SEO';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
 import { useAuth } from '../hooks/useAuth';
 import { useGoalSettings } from '../hooks/useGoalSettings';
 import { useEmployees } from '../hooks/useEmployees';
 import { motion } from 'motion/react';
-import { auth, db } from '../firebase';
-import { GoogleAuthProvider, linkWithPopup, unlink } from 'firebase/auth';
+import { auth, db, storage } from '../firebase';
+import { GoogleAuthProvider, linkWithPopup, unlink, EmailAuthProvider, reauthenticateWithCredential, updatePassword, updateProfile } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { useWhatsapp } from '../contexts/WhatsappContext';
 
 export default function AdminProfile() {
   const { user, adminProfile, updateAdminProfile } = useAuth();
@@ -15,97 +18,109 @@ export default function AdminProfile() {
   const { teamMembers } = useEmployees();
   const [isLinking, setIsLinking] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [whatsappStatus, setWhatsappStatus] = useState<'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready'>('disconnected');
-  const [whatsappQR, setWhatsappQR] = useState<string | null>(null);
-  const [whatsappUser, setWhatsappUser] = useState<any>(null);
-  const [showQRModal, setShowQRModal] = useState(false);
-  const [connectionMethod, setConnectionMethod] = useState<'qr' | 'phone'>('qr');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const [isRequestingCode, setIsRequestingCode] = useState(false);
 
-  useEffect(() => {
-    const checkStatus = async () => {
-      try {
-        const res = await fetch('/api/whatsapp/status');
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          setWhatsappStatus(data.status);
-          setWhatsappQR(data.qr);
-          setWhatsappUser(data.user);
-        } catch (e) {
-          console.warn("Received non-JSON response for WhatsApp status. Server might be restarting.");
-        }
-      } catch (e) {
-        console.error("Error checking WhatsApp status:", e);
-      }
-    };
+  const {
+    whatsappStatus,
+    whatsappUser,
+    handleConnectWhatsApp,
+    handleLogoutWhatsApp,
+    setShowQRModal
+  } = useWhatsapp();
 
-    checkStatus();
-    const interval = setInterval(checkStatus, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  // Avatar upload state
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
-  const handleConnectWhatsApp = async () => {
-    try {
-      const res = await fetch('/api/whatsapp/connect', { method: 'POST' });
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
-      }
-      const text = await res.text();
-      try {
-        const data = JSON.parse(text);
-        setWhatsappStatus(data.status);
-        setWhatsappQR(data.qr);
-        setShowQRModal(true);
-      } catch (e) {
-        console.warn("Received non-JSON response for WhatsApp connect. Server might be restarting.");
-        alert("Erro ao conectar WhatsApp. O servidor pode estar reiniciando.");
-      }
-    } catch (e) {
-      console.error("Error connecting WhatsApp:", e);
-      alert("Erro ao conectar WhatsApp.");
-    }
-  };
+  // Senha States
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
-  const handleRequestPairingCode = async () => {
-    if (!phoneNumber) {
-      alert('Por favor, insira o número de telefone com DDI e DDD (ex: 5511999999999).');
+  const handleUpdatePassword = async () => {
+    if (!user || !user.email) return;
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      alert("Preencha todos os campos de senha.");
       return;
     }
-    setIsRequestingCode(true);
+    if (newPassword !== confirmPassword) {
+      alert("A nova senha e a confirmação não coincidem.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      alert("A nova senha deve ter no mínimo 6 caracteres.");
+      return;
+    }
+
+    setIsUpdatingPassword(true);
     try {
-      const res = await fetch('/api/whatsapp/pair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneNumber })
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Erro ao solicitar código');
-      }
-      const data = await res.json();
-      setPairingCode(data.code);
+      const credential = EmailAuthProvider.credential(user.email, currentPassword);
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, newPassword);
+      alert("Senha atualizada com sucesso!");
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
     } catch (error: any) {
-      console.error("Error requesting pairing code:", error);
-      alert(error.message || "Erro ao solicitar código de pareamento.");
+      console.error("Erro ao atualizar senha:", error);
+      if (error.code === 'auth/invalid-credential') {
+         alert("A senha atual informada está incorreta.");
+      } else {
+         alert("Erro ao atualizar a senha: " + error.message);
+      }
     } finally {
-      setIsRequestingCode(false);
+      setIsUpdatingPassword(false);
     }
   };
 
-  const handleLogoutWhatsApp = async () => {
-    if (!confirm("Deseja realmente desconectar o WhatsApp?")) return;
+  const handleUploadAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0 || !user) return;
+    const file = e.target.files[0];
+
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      alert('Formato inválido. Use JPG, PNG ou WebP.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Arquivo muito grande. Máximo: 5 MB.');
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    setUploadProgress(0);
+
     try {
-      await fetch('/api/whatsapp/logout', { method: 'POST' });
-      setWhatsappStatus('disconnected');
-      setWhatsappQR(null);
-    } catch (e) {
-      console.error("Error logging out WhatsApp:", e);
+      const storageRef = ref(storage, `avatars/${user.uid}/${Date.now()}_${file.name}`);
+      const uploadTask = uploadBytesResumable(storageRef, file, { contentType: file.type });
+
+      await new Promise<void>((resolve, reject) => {
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+          },
+          reject,
+          resolve
+        );
+      });
+
+      const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+
+      // 1. Update Firebase Auth profile
+      await updateProfile(user, { photoURL: downloadURL });
+
+      // 2. Update Firestore users document
+      await updateDoc(doc(db, 'users', user.uid), { avatarUrl: downloadURL });
+
+      // 3. Update local state via hook
+      await updateAdminProfile({ avatarUrl: downloadURL });
+    } catch (error: any) {
+      console.error('[Avatar Upload] Error:', error);
+      alert('Erro ao enviar a foto: ' + (error.message || 'Tente novamente.'));
+    } finally {
+      setIsUploadingAvatar(false);
+      setUploadProgress(0);
     }
   };
 
@@ -193,6 +208,7 @@ export default function AdminProfile() {
         </div>
       </div>
 
+      <SEO title="Meu Perfil" />
       <AdminSidebar activePage="profile" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       <main className="md:ml-64 w-full flex-1 min-h-screen relative">
@@ -308,9 +324,10 @@ export default function AdminProfile() {
                         </div>
                       )}
                     </div>
-                    <button className="absolute -bottom-3 -right-3 w-10 h-10 bg-secondary text-on-secondary rounded-xl flex items-center justify-center shadow-lg hover:scale-110 transition-transform">
+                    <label className="absolute -bottom-3 -right-3 w-10 h-10 bg-secondary text-on-secondary rounded-xl flex items-center justify-center shadow-lg hover:scale-110 transition-transform cursor-pointer">
                       <span className="material-symbols-outlined text-xl">edit</span>
-                    </button>
+                      <input type="file" accept="image/*" className="hidden" onChange={handleUploadAvatar} />
+                    </label>
                   </div>
 
                   <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
@@ -427,33 +444,51 @@ export default function AdminProfile() {
               </div>
             </div>
 
-            {/* Right Column: Security */}
+            {/* Right Column */}
             <div className="space-y-8">
+              
+              {/* Security Card - Password Change */}
               <div className="bg-white/[0.02] border border-white/10 backdrop-blur-xl p-8 rounded-2xl">
                 <div className="flex items-center gap-3 mb-8">
                   <span className="material-symbols-outlined text-secondary">security</span>
                   <h3 className="text-xl font-headline font-bold text-white">Segurança</h3>
                 </div>
 
-                <div className="space-y-6">
-                  <div className="p-6 bg-white/[0.02] border border-white/5 rounded-2xl">
-                    <h4 className="text-white font-bold text-sm mb-2">Alterar Senha</h4>
-                    <p className="text-xs text-white/40 mb-6">Recomendamos uma senha forte com pelo menos 12 caracteres.</p>
-                    <button className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-headline font-bold uppercase tracking-widest text-white transition-all">
-                      Atualizar Senha
-                    </button>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold mb-2">Senha Atual</label>
+                    <input 
+                      type="password" 
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white font-light focus:ring-1 focus:ring-secondary/50 outline-none"
+                    />
                   </div>
-
-                  <div className="p-6 bg-white/[0.02] border border-white/5 rounded-2xl">
-                    <div className="flex justify-between items-start mb-2">
-                      <h4 className="text-white font-bold text-sm">Autenticação 2FA</h4>
-                      <span className="bg-emerald-500/10 text-emerald-500 text-[8px] font-bold uppercase tracking-widest px-2 py-1 rounded-full">Ativo</span>
-                    </div>
-                    <p className="text-xs text-white/40 mb-6">Proteja sua conta com uma camada extra de segurança via App.</p>
-                    <button className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-headline font-bold uppercase tracking-widest text-white transition-all">
-                      Gerenciar 2FA
-                    </button>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold mb-2">Nova Senha</label>
+                    <input 
+                      type="password" 
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white font-light focus:ring-1 focus:ring-secondary/50 outline-none"
+                    />
                   </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold mb-2">Confirmar Nova Senha</label>
+                    <input 
+                      type="password" 
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white font-light focus:ring-1 focus:ring-secondary/50 outline-none"
+                    />
+                  </div>
+                  <button 
+                    onClick={handleUpdatePassword}
+                    disabled={isUpdatingPassword}
+                    className="w-full mt-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl py-3 text-[10px] font-headline font-bold uppercase tracking-widest text-white transition-all disabled:opacity-50"
+                  >
+                    {isUpdatingPassword ? 'Atualizando...' : 'Atualizar Senha'}
+                  </button>
                 </div>
               </div>
 
@@ -486,103 +521,6 @@ export default function AdminProfile() {
         </div>
       </main>
 
-      {/* QR Code / Pairing Modal */}
-      {showQRModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowQRModal(false)}></div>
-          <div className="relative bg-[#0e0e0e] border border-white/10 p-8 rounded-3xl max-w-sm w-full text-center space-y-6 shadow-2xl">
-            <div className="flex justify-between items-center">
-              <h3 className="text-xl font-headline font-bold text-white">Conectar WhatsApp</h3>
-              <button onClick={() => setShowQRModal(false)} className="text-white/40 hover:text-white">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-
-            <div className="flex bg-white/5 p-1 rounded-xl mb-6">
-              <button 
-                onClick={() => setConnectionMethod('qr')}
-                className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${connectionMethod === 'qr' ? 'bg-secondary text-white shadow-lg' : 'text-white/50 hover:text-white'}`}
-              >
-                QR Code
-              </button>
-              <button 
-                onClick={() => setConnectionMethod('phone')}
-                className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all ${connectionMethod === 'phone' ? 'bg-secondary text-white shadow-lg' : 'text-white/50 hover:text-white'}`}
-              >
-                Telefone (SMS)
-              </button>
-            </div>
-            
-            {connectionMethod === 'qr' ? (
-              <>
-                <div className="bg-white p-4 rounded-2xl inline-block mx-auto">
-                  {whatsappQR ? (
-                    <img src={whatsappQR} alt="WhatsApp QR Code" className="w-64 h-64" />
-                  ) : (
-                    <div className="w-64 h-64 flex items-center justify-center bg-black/5">
-                      <div className="w-8 h-8 border-2 border-secondary border-t-transparent rounded-full animate-spin"></div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm text-white font-medium">Escaneie o código acima</p>
-                  <p className="text-xs text-white/40 leading-relaxed">
-                    Abra o WhatsApp no seu celular, vá em Aparelhos Conectados e escaneie este código para autenticar. O código atualiza automaticamente.
-                  </p>
-                </div>
-              </>
-            ) : (
-              <div className="space-y-6">
-                {!pairingCode ? (
-                  <>
-                    <div className="space-y-2 text-left">
-                      <label className="block text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold mb-2">Número do WhatsApp</label>
-                      <input 
-                        type="text" 
-                        placeholder="Ex: 5511999999999"
-                        value={phoneNumber}
-                        onChange={(e) => setPhoneNumber(e.target.value)}
-                        className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 px-4 text-sm text-white font-light focus:ring-1 focus:ring-secondary/50 outline-none"
-                      />
-                      <p className="text-[10px] text-white/30 mt-1">Inclua o código do país (55) e DDD.</p>
-                    </div>
-                    <button 
-                      onClick={handleRequestPairingCode}
-                      disabled={isRequestingCode || !phoneNumber}
-                      className="w-full bg-secondary text-on-secondary px-6 py-3 rounded-xl font-headline font-bold text-xs uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
-                    >
-                      {isRequestingCode ? 'Gerando...' : 'Gerar Código'}
-                    </button>
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    <p className="text-sm text-white font-medium">Seu código de pareamento:</p>
-                    <div className="bg-white/5 border border-white/10 p-6 rounded-2xl">
-                      <span className="text-4xl font-mono font-bold text-secondary tracking-[0.2em]">{pairingCode}</span>
-                    </div>
-                    <p className="text-xs text-white/40 leading-relaxed">
-                      Abra o WhatsApp no seu celular, vá em Aparelhos Conectados &gt; Conectar com número de telefone e insira o código acima.
-                    </p>
-                    <button 
-                      onClick={() => setPairingCode(null)}
-                      className="text-[10px] text-white/50 hover:text-white uppercase tracking-widest font-bold"
-                    >
-                      Gerar novo código
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {whatsappStatus === 'ready' && (
-              <div className="bg-emerald-500/10 text-emerald-500 py-3 rounded-xl text-xs font-bold uppercase tracking-widest mt-4">
-                Conectado com Sucesso!
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

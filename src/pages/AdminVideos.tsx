@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SEO from '../components/SEO';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
 import { motion, AnimatePresence } from 'motion/react';
@@ -243,6 +244,7 @@ export default function AdminVideos() {
         </div>
       </div>
 
+      <SEO title="Vídeos" />
       <AdminSidebar activePage="videos" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}

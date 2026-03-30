@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import SEO from '../components/SEO';
 import { motion, AnimatePresence } from 'motion/react';
 import { io, Socket } from 'socket.io-client';
 import { auth } from '../firebase';
@@ -372,6 +373,7 @@ const AdminNextZap: React.FC = () => {
 
   return (
     <div className="flex h-[100dvh] bg-surface text-on-surface font-sans overflow-hidden relative">
+      <SEO title="NextZap" />
       <AdminSidebar activePage="tools" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
       <main className="flex-1 lg:ml-64 flex overflow-hidden w-full relative">
