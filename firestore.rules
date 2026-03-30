@@ -46,9 +46,11 @@ service cloud.firestore {
     // ===============================================================
     
     match /settings/{settingId} {
-      // Anyone can read the settings (it's the public landing page)
-      allow read: if true;
-      // Only admins can update settings
+      // Only the 'global' document is public (powers the landing page).
+      // Any other settings document requires authentication.
+      // This is the ONLY intentional unauthenticated read in the entire schema.
+      allow read: if settingId == 'global' || isAuthenticated();
+      // Only admins can write settings
       allow write: if isAdmin() && (settingId == 'global' || settingId == request.auth.uid);
     }
     
@@ -66,11 +68,6 @@ service cloud.firestore {
       );
       
       allow create: if isAdmin();
-    }
-    
-    match /leadsColhidos/{leadId} {
-      // Only admins and editors can read and write leads
-      allow read, write: if isAdminOrEditor();
     }
     
     match /dorks/{dorkId} {
@@ -134,6 +131,41 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && request.auth.uid == resource.data.uid;
       allow create: if isAuthenticated();
+    }
+
+    match /whatsapp_sessions/{userId} {
+      // Each user can only access their own WhatsApp session (uid isolation)
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      // Admins can read sessions for support/debugging but cannot write
+      allow read: if isAdmin();
+
+      match /keys/{keyId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
+    }
+
+    match /videoPipelineRuns/{runId} {
+      // Only admins can read/write pipeline run logs
+      allow read, write: if isAdmin();
+    }
+
+    match /leadsColhidos/{leadId} {
+      // Role-based: admins and editors can manage leads
+      // Additionally enforces ownerId isolation: a lead belongs to who created it
+      allow read: if isAdminOrEditor() && (
+        isMasterOwner() ||
+        !('ownerId' in resource.data) ||
+        resource.data.ownerId == request.auth.uid
+      );
+      allow create: if isAdminOrEditor() && (
+        !('ownerId' in request.resource.data) ||
+        request.resource.data.ownerId == request.auth.uid
+      );
+      allow update, delete: if isAdminOrEditor() && (
+        isMasterOwner() ||
+        !('ownerId' in resource.data) ||
+        resource.data.ownerId == request.auth.uid
+      );
     }
   }
 }

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { useSales, Sale } from '../hooks/useSales';
 import { useClients } from '../hooks/useClients';
 import { useDemands } from '../hooks/useDemands';
@@ -36,6 +37,8 @@ import { ptBR } from 'date-fns/locale';
 type TimeFilter = 'today' | '7d' | '14d' | '1m' | '6m' | 'custom';
 
 export default function AdminDashboard() {
+  usePageTitle('Dashboard Geral');
+
   const { sales } = useSales();
   const { clients } = useClients();
   const { demands } = useDemands();
@@ -273,22 +276,22 @@ export default function AdminDashboard() {
       <AdminSidebar activePage="dashboard" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main Content Area */}
-      <main className="md:ml-64 flex-1 min-h-screen relative w-full">
+      <main className="lg:ml-64 flex-1 min-h-[100dvh] relative w-full pt-24 lg:pt-0">
         {/* Top Bar */}
-        <header className="fixed top-0 right-0 w-full md:w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-6 md:px-10 gap-4">
+        <header className="fixed top-0 right-0 w-full lg:w-[calc(100%-16rem)] h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-6 lg:px-10 gap-4">
           <button 
-            className="md:hidden text-white/70 hover:text-white shrink-0"
+            className="lg:hidden text-white/70 hover:text-white shrink-0"
             onClick={() => setIsSidebarOpen(true)}
           >
-            <span className="material-symbols-outlined text-2xl">menu</span>
+            <span className="material-symbols-outlined text-3xl">menu</span>
           </button>
           
-          <div className="hidden md:block">
+          <div className="hidden sm:block">
             <GlobalSearch />
           </div>
 
-          <div className="flex items-center gap-2 md:gap-6 ml-auto flex-wrap justify-end">
-            <div className="flex bg-white/5 rounded-xl p-1 border border-white/10 overflow-x-auto max-w-[200px] md:max-w-none scrollbar-hide">
+          <div className="flex items-center gap-2 lg:gap-6 ml-auto flex-wrap justify-end">
+            <div className="flex bg-white/5 rounded-xl p-1 border border-white/10 overflow-x-auto max-w-[140px] sm:max-w-none scrollbar-hide">
               {(['today', '7d', '14d', '1m', '6m'] as TimeFilter[]).map((f) => (
                 <button
                   key={f}

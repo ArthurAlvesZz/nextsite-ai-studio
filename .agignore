@@ -1,0 +1,16 @@
+# Impede o agente frontend de ler o ambiente pesado do backend
+venv/
+__pycache__/
+*.mp4
+*.mkv
+logs_scraper/
+mongodb_data/
+redis_dump.rdb
+
+# Ignora dependências do front que estouram o limite de contexto
+node_modules/
+.next/
+dist/
+
+# Impede leitura dupla da arquitetura
+.agent/history/

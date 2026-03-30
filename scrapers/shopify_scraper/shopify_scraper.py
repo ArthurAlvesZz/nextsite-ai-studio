@@ -21,12 +21,20 @@ from bs4 import BeautifulSoup
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-log = logging.getLogger(__name__)
+class SimpleLogger:
+    def _ts(self):
+        return datetime.utcnow().strftime("%H:%M:%S")
+    def info(self, msg, *args):
+        m = msg % args if args else msg
+        print(f"[{self._ts()}] [INFO] {m}", flush=True)
+    def warning(self, msg, *args):
+        m = msg % args if args else msg
+        print(f"[{self._ts()}] [WARN] {m}", flush=True)
+    def error(self, msg, *args):
+        m = msg % args if args else msg
+        print(f"[{self._ts()}] [ERRO] {m}", flush=True)
+
+log = SimpleLogger()
 
 # ---------------------------------------------------------------------------
 # Constants

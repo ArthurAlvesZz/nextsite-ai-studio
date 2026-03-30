@@ -1,0 +1,8 @@
+Task: NextSite Lead Engine Python Scraper Optimization
+File to edit: scrapers/shopify_scraper/shopify_scraper.py
+
+Please update this python scraper with the following tasks strictly:
+1. Implement advanced granular Error Handling (`try-except`) for every individual URL processed in the async loop. If a single Shopify store is down or times out, the script MUST catch the exception, log the failure smoothly, and CONTINUE processing the rest of the list. It should never crash the entire run because of one bad apple.
+2. Ensure you are outputting simple textual logs directly to `sys.stdout` or `print()` containing prefixes like "[INFO]", "[ERRO]", or "[SUCCESS]" for each major step of a URL processing. Our Node.js frontend streams each line, so be descriptive.
+
+Apply these modifications to the file and complete the task.

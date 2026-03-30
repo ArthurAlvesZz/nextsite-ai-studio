@@ -8,7 +8,8 @@
       "Bash(npx tsc:*)",
       "Bash(find node_modules/@whiskeysockets/baileys -name makeInMemoryStore*)",
       "Read(//c/Users/TAY/.claude/projects/C--Users-TAY-Desktop-NextCreative-Site-nextsite-ai-studio/**)",
-      "Read(//c/Users/TAY/.claude/projects/C--Users-TAY-Desktop-NextCreative-Site-nextsite-ai-studio/memory/**)"
+      "Read(//c/Users/TAY/.claude/projects/C--Users-TAY-Desktop-NextCreative-Site-nextsite-ai-studio/memory/**)",
+      "Bash(npm run:*)"
     ]
   }
 }

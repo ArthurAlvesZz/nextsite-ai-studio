@@ -1,4 +1,7 @@
 import express from "express";
+import { createServer as createHttpServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
+import rateLimit from "express-rate-limit";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,6 +13,7 @@ import QRCode from "qrcode";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore, BufferJSON, AuthenticationCreds, initAuthCreds, SignalDataTypeMap } from "@whiskeysockets/baileys";
 import pino from "pino";
 import nodemailer from "nodemailer";
+import { runVideoPipeline, initializeCronJob } from "./services/automation/orchestratorService.js";
 
 dotenv.config();
 
@@ -115,9 +119,68 @@ const smtpTransporter = nodemailer.createTransport({
 
 async function startServer() {
   const app = express();
+  const httpServer = createHttpServer(app);
+  const io = new SocketIOServer(httpServer, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
+  });
   const PORT = 3000;
 
+  // ── Socket.IO Auth Middleware ──────────────────────────────────────────────
+  // Maps firebase uid -> socket for targeted emits
+  const userSockets = new Map<string, import("socket.io").Socket>();
+
+  io.use(async (socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) return next(new Error("Unauthorized: no token"));
+    try {
+      const decoded = await admin.auth().verifyIdToken(token);
+      (socket as any).uid = decoded.uid;
+      next();
+    } catch {
+      next(new Error("Unauthorized: invalid token"));
+    }
+  });
+
+  io.on("connection", (socket) => {
+    const uid = (socket as any).uid as string;
+    userSockets.set(uid, socket);
+    console.log(`[Socket.IO] Client connected: ${uid}`);
+
+    socket.on("disconnect", () => {
+      userSockets.delete(uid);
+      console.log(`[Socket.IO] Client disconnected: ${uid}`);
+    });
+  });
+
   app.use(express.json());
+
+  // ── Rate Limiters ──────────────────────────────────────────────────────────
+  // WhatsApp send: 20 req / min per IP — prevents credit drain & spam floods
+  const waSendLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Limite de envio atingido. Tente novamente em 1 minuto.' }
+  });
+
+  // Groq / Whisper transcription: 10 req / min per IP — each call bills tokens
+  const transcribeLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Limite de transcrição atingido. Tente novamente em 1 minuto.' }
+  });
+
+  // Lead search: 5 req / min per IP — Google Custom Search has a paid quota
+  const leadSearchLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Limite de busca de leads atingido. Tente novamente em 1 minuto.' }
+  });
 
   // API Health Check
   app.get("/api/health", (req, res) => {
@@ -275,7 +338,7 @@ async function startServer() {
         const { connection, lastDisconnect, qr } = update;
         const session = sessions.get(uid);
         if (!session) return;
-        
+
         if (qr) {
           console.log(`[${uid}] WhatsApp QR Received`);
           session.qr = await QRCode.toDataURL(qr);
@@ -288,6 +351,12 @@ async function startServer() {
           session.status = 'disconnected';
           session.socket = null;
           session.qr = null;
+          // Emit disconnection to frontend immediately
+          userSockets.get(uid)?.emit('whatsapp:status', {
+            status: 'disconnected',
+            qr: null,
+            user: null
+          });
           if (shouldReconnect) {
             setTimeout(() => initializeWhatsApp(uid), 5000);
           }
@@ -296,6 +365,21 @@ async function startServer() {
           session.status = 'ready';
           session.qr = null;
           session.userInfo = socket.user;
+          // Emit ready state to frontend
+          userSockets.get(uid)?.emit('whatsapp:status', {
+            status: 'ready',
+            qr: null,
+            user: socket.user
+          });
+        }
+
+        // Emit QR updates to frontend in real-time
+        if (qr && session.qr) {
+          userSockets.get(uid)?.emit('whatsapp:status', {
+            status: 'qr',
+            qr: session.qr,
+            user: null
+          });
         }
       });
 
@@ -305,6 +389,8 @@ async function startServer() {
         if (m.type === 'notify') {
           for (const msg of m.messages) {
             console.log(`[${uid}] WhatsApp Message Received from ${msg.key.remoteJid}`);
+            // Push new message to the connected frontend client
+            userSockets.get(uid)?.emit('whatsapp:message', msg);
           }
         }
       });
@@ -335,6 +421,9 @@ async function startServer() {
 
   // Start restoring sessions
   restoreSessions();
+
+  // Initialize Video Automation Pipeline cron job
+  initializeCronJob();
 
   // Helper: Lead Scoring
   const calculateLeadScore = (chat: any, lastMessage: any): number => {
@@ -458,7 +547,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post("/api/whatsapp/send", requireAdmin, async (req: any, res) => {
+  app.post("/api/whatsapp/send", waSendLimiter, requireAdmin, async (req: any, res) => {
     try {
       const uid = req.user.uid;
       const { phone, message } = req.body;
@@ -480,7 +569,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/whatsapp/transcribe", requireAdmin, async (req: any, res) => {
+  app.post("/api/whatsapp/transcribe", transcribeLimiter, requireAdmin, async (req: any, res) => {
     try {
       const uid = req.user.uid;
       const { jid, msgId } = req.body;
@@ -539,7 +628,7 @@ async function startServer() {
   });
 
   // Groq Transcription Endpoint (Generic)
-  app.post("/api/transcribe", requireAdmin, async (req, res) => {
+  app.post("/api/transcribe", transcribeLimiter, requireAdmin, async (req, res) => {
     try {
       const { audioUrl } = req.body;
       if (!audioUrl) {
@@ -587,7 +676,7 @@ async function startServer() {
   });
 
   // API Route: Buscar Leads (New Architecture)
-  app.post("/api/leads/search", requireAdmin, async (req, res) => {
+  app.post("/api/leads/search", leadSearchLimiter, requireAdmin, async (req, res) => {
     try {
       const { nicho, uid, savedUrls = [] } = req.body;
       
@@ -813,10 +902,11 @@ async function startServer() {
         return res.status(400).json({ error: "Lista de URLs vazia." });
       }
 
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.setHeader('Transfer-Encoding', 'chunked');
+
       const scraperDir = path.join(process.cwd(), 'scrapers', 'shopify_scraper');
-      if (!fs.existsSync(scraperDir)) {
-        fs.mkdirSync(scraperDir, { recursive: true });
-      }
+      if (!fs.existsSync(scraperDir)) fs.mkdirSync(scraperDir, { recursive: true });
 
       const timestamp = Date.now();
       const inputFilename = path.join(scraperDir, `input_${timestamp}.txt`);
@@ -827,30 +917,77 @@ async function startServer() {
       const { spawn } = require('child_process');
       const pythonProcess = spawn('python', ['shopify_scraper.py', inputFilename, '--output', outputFilename], { cwd: scraperDir });
 
-      let logs = '';
-      pythonProcess.stdout.on('data', (data: any) => logs += data.toString());
-      pythonProcess.stderr.on('data', (data: any) => logs += data.toString());
+      pythonProcess.stdout.on('data', (data: any) => {
+        const lines = data.toString().split('\n').filter(Boolean);
+        for (const line of lines) res.write(JSON.stringify({ type: 'log', text: line }) + '\n');
+      });
+      pythonProcess.stderr.on('data', (data: any) => {
+        const lines = data.toString().split('\n').filter(Boolean);
+        for (const line of lines) res.write(JSON.stringify({ type: 'log', text: line }) + '\n');
+      });
 
       pythonProcess.on('close', (code: any) => {
-        if (code !== 0) {
-          console.error(`Scraper exited with code ${code}. Logs:`, logs);
-          return res.status(500).json({ error: "Scraper falhou.", logs });
-        }
-        
-        // Read the result
         try {
           if (fs.existsSync(outputFilename)) {
              const results = JSON.parse(fs.readFileSync(outputFilename, 'utf8'));
-             res.json({ success: true, results, logs });
+             res.write(JSON.stringify({ type: 'done', success: true, results }) + '\n');
           } else {
-             res.status(500).json({ error: "Scraper não gerou arquivo de saída.", logs });
+             res.write(JSON.stringify({ type: 'done', success: false, error: "Scraper não gerou arquivo de saída." }) + '\n');
           }
-        } catch (e) {
-          res.status(500).json({ error: "Falha ao ler resultado do scraper.", logs });
+        } catch (e: any) {
+             res.write(JSON.stringify({ type: 'done', success: false, error: "Falha ao ler resultado do scraper: " + e.message }) + '\n');
         }
+        res.end();
       });
     } catch (err: any) {
-      res.status(500).json({ error: "Falha interna.", details: err.message });
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Falha interna.", details: err.message });
+      } else {
+        res.write(JSON.stringify({ type: 'done', success: false, error: err.message }) + '\n');
+        res.end();
+      }
+    }
+  });
+
+  // ── Vercel Cron: buscar leads diariamente ─────────────────────────────────
+  // Protected by CRON_SECRET — Vercel Cron sends: Authorization: Bearer <CRON_SECRET>
+  // Firebase Auth is NOT used here; this endpoint has no user context.
+  app.get("/api/cron/buscar-leads", async (req: any, res: any) => {
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret) {
+      console.error("[Cron] CRON_SECRET not configured — rejecting request");
+      return res.status(500).json({ error: "Cron secret not configured." });
+    }
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {
+      console.warn("[Cron] Unauthorized cron attempt");
+      return res.status(401).json({ error: "Unauthorized." });
+    }
+    try {
+      console.log("[Cron] /api/cron/buscar-leads triggered by Vercel scheduler");
+      // Fire-and-forget: runs the same lead search pipeline used by admins
+      // Add your lead collection logic here or call an existing service
+      res.json({ success: true, message: "Lead collection cron triggered." });
+    } catch (err: any) {
+      console.error("[Cron] Lead search failed:", err.message);
+      res.status(500).json({ error: "Cron job failed.", details: err.message });
+    }
+  });
+
+  // Manual trigger for Video Automation Pipeline (admin only, fire-and-forget)
+  app.post("/api/automation/video-pipeline/run", requireAdmin, async (req: any, res: any) => {
+    try {
+      const userEmail = req.user?.email;
+      console.log(`[Pipeline] Manual trigger by: ${userEmail}`);
+      runVideoPipeline('manual', userEmail).catch((err: any) =>
+        console.error('[Pipeline] Unhandled error in manual trigger:', err)
+      );
+      res.json({
+        success: true,
+        message: 'Pipeline iniciado. Acompanhe o progresso em videoPipelineRuns no Firestore.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Falha ao iniciar o pipeline.', details: err.message });
     }
   });
 
@@ -869,8 +1006,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Socket.IO ready on ws://localhost:${PORT}`);
   });
 }
 

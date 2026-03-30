@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { io, Socket } from 'socket.io-client';
 import { auth } from '../firebase';
 import { 
   Search, 
@@ -32,6 +33,7 @@ import {
   QrCode
 } from 'lucide-react';
 import AdminSidebar from '../components/AdminSidebar';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 interface Chat {
   id: string;
@@ -55,6 +57,7 @@ interface Message {
 }
 
 const AdminNextZap: React.FC = () => {
+  usePageTitle('NextZap CRM');
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -67,6 +70,8 @@ const AdminNextZap: React.FC = () => {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [userInfo, setUserInfo] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const selectedChatRef = useRef<Chat | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -165,10 +170,86 @@ const AdminNextZap: React.FC = () => {
     }
   };
 
+  // Keep selectedChatRef in sync so the socket handler can read it without stale closure
   useEffect(() => {
+    selectedChatRef.current = selectedChat;
+  }, [selectedChat]);
+
+  // ── Socket.IO real-time connection ──────────────────────────────────────────
+  useEffect(() => {
+    let socket: Socket;
+
+    const connectSocket = async () => {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) return;
+
+      socket = io({ auth: { token } });
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
+        console.log('[NextZap] Socket connected:', socket.id);
+      });
+
+      // Real-time status + QR from server
+      socket.on('whatsapp:status', (data: { status: typeof whatsappStatus; qr: string | null; user: any }) => {
+        setWhatsappStatus(data.status);
+        setQrCode(data.qr);
+        setUserInfo(data.user);
+        if (data.status === 'ready') {
+          fetchChats();
+        }
+      });
+
+      // Real-time incoming messages
+      socket.on('whatsapp:message', (msg: any) => {
+        const jid = msg.key?.remoteJid;
+        if (!jid) return;
+
+        // Derive message shape same as fetchMessages
+        let type: Message['type'] = 'text';
+        let text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+        if (msg.message?.imageMessage) { type = 'image'; text = msg.message.imageMessage.url || 'Imagem'; }
+        else if (msg.message?.videoMessage) { type = 'video'; text = msg.message.videoMessage.url || 'Vídeo'; }
+        else if (msg.message?.audioMessage) { type = 'audio'; text = 'Mensagem de áudio'; }
+        else if (msg.message?.documentMessage) { type = 'document'; text = msg.message.documentMessage.fileName || 'Documento'; }
+
+        const newMsg: Message = {
+          id: msg.key.id,
+          text,
+          type,
+          sender: msg.key.fromMe ? 'me' : 'them',
+          timestamp: msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now(),
+          status: 'sent'
+        };
+
+        // Append to open chat if it matches, otherwise update unread count in list
+        if (selectedChatRef.current?.id === jid) {
+          setMessages(prev => {
+            if (prev.some(m => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+        } else {
+          setChats(prev => prev.map(c =>
+            c.id === jid
+              ? { ...c, lastMessage: text, timestamp: newMsg.timestamp, unreadCount: (c.unreadCount || 0) + 1 }
+              : c
+          ));
+        }
+      });
+
+      socket.on('disconnect', () => {
+        console.log('[NextZap] Socket disconnected');
+      });
+    };
+
+    // Initial HTTP fetch for status (one-time, replaces the old polling)
     fetchStatus();
-    const interval = setInterval(fetchStatus, 10000);
-    return () => clearInterval(interval);
+    connectSocket();
+
+    return () => {
+      socket?.disconnect();
+      socketRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -290,30 +371,38 @@ const AdminNextZap: React.FC = () => {
   });
 
   return (
-    <div className="flex h-screen bg-surface text-on-surface font-sans overflow-hidden">
+    <div className="flex h-[100dvh] bg-surface text-on-surface font-sans overflow-hidden relative">
       <AdminSidebar activePage="tools" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       
-      <main className="flex-1 ml-64 flex overflow-hidden">
+      <main className="flex-1 lg:ml-64 flex overflow-hidden w-full relative">
         {/* Left Sidebar: Chat List */}
-        <div className="w-80 lg:w-96 flex flex-col border-r border-outline-variant/10 bg-surface-container-low">
+        <div className={`w-full lg:w-80 xl:w-96 flex-col border-r border-outline-variant/10 bg-surface-container-low shrink-0 h-full ${selectedChat ? 'hidden lg:flex' : 'flex'}`}>
           {/* Header */}
-          <div className="h-[60px] px-4 flex items-center justify-between bg-surface-container">
+          <div className="h-[60px] px-4 flex items-center justify-between bg-surface-container shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center overflow-hidden">
+              <button 
+                className="lg:hidden p-2 -ml-2 hover:bg-surface-container-high rounded-full text-on-surface transition-colors"
+                onClick={() => setIsSidebarOpen(true)}
+              >
+                <div className="w-5 h-[2px] bg-current mb-1" />
+                <div className="w-5 h-[2px] bg-current mb-1" />
+                <div className="w-5 h-[2px] bg-current" />
+              </button>
+              <div className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center overflow-hidden shrink-0">
                 {userInfo?.imgUrl ? (
                   <img src={userInfo.imgUrl} alt="Me" className="w-full h-full object-cover" />
                 ) : (
                   <User size={24} className="text-on-surface-variant" />
                 )}
               </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">{userInfo?.name || 'NextZap'}</span>
-                <span className="text-[10px] text-on-surface-variant uppercase tracking-wider">
+              <div className="flex flex-col truncate">
+                <span className="text-sm font-medium truncate">{userInfo?.name || 'NextZap'}</span>
+                <span className="text-[10px] text-on-surface-variant uppercase tracking-wider truncate">
                   {whatsappStatus === 'ready' ? 'Conectado' : 'Desconectado'}
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-on-surface-variant">
+            <div className="flex items-center gap-1 md:gap-4 text-on-surface-variant shrink-0">
               <button className="p-2 hover:bg-surface-container-high rounded-full transition-colors" title="Novo Chat">
                 <MessageSquare size={20} />
               </button>
@@ -331,12 +420,12 @@ const AdminNextZap: React.FC = () => {
           </div>
 
           {/* Search */}
-          <div className="p-2 bg-surface-container-low border-b border-outline-variant/10">
+          <div className="p-2 bg-surface-container-low border-b border-outline-variant/10 shrink-0">
             <div className="relative flex items-center bg-surface-container rounded-lg px-3 py-1.5 group">
-              <Search size={18} className="text-on-surface-variant group-focus-within:text-primary transition-colors" />
+              <Search size={18} className="text-on-surface-variant group-focus-within:text-primary transition-colors shrink-0" />
               <input 
                 type="text" 
-                placeholder="Pesquisar ou começar uma nova conversa"
+                placeholder="Pesquisar nova conversa"
                 className="bg-transparent border-none focus:ring-0 text-sm w-full ml-3 placeholder-on-surface-variant text-on-surface"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -374,7 +463,7 @@ const AdminNextZap: React.FC = () => {
                 )}
                 <h3 className="text-lg font-medium mb-2">Conecte seu WhatsApp</h3>
                 <p className="text-sm text-on-surface-variant mb-6">
-                  Escaneie o código QR ou clique no botão abaixo para iniciar a conexão com o NextZap.
+                  Escaneie o código QR ou clique no botão abaixo para iniciar a conexão.
                 </p>
                 <button 
                   onClick={handleConnect}
@@ -401,14 +490,14 @@ const AdminNextZap: React.FC = () => {
                   </div>
                   <div className="ml-3 flex-1 overflow-hidden">
                     <div className="flex justify-between items-center mb-1">
-                      <h4 className="text-base font-normal truncate">{chat.name}</h4>
-                      <span className="text-[11px] text-on-surface-variant">
+                      <h4 className="text-base font-normal truncate pr-2">{chat.name}</h4>
+                      <span className="text-[11px] text-on-surface-variant whitespace-nowrap">
                         {new Date(chat.timestamp || 0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <p className="text-sm text-on-surface-variant truncate flex-1">{chat.lastMessage}</p>
-                      <div className="flex items-center gap-2">
+                      <p className="text-sm text-on-surface-variant truncate flex-1 pr-2">{chat.lastMessage}</p>
+                      <div className="flex items-center gap-2 shrink-0">
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${chat.leadScore > 70 ? 'bg-error text-on-error' : chat.leadScore > 50 ? 'bg-secondary text-on-secondary' : 'bg-surface-container-high text-on-surface-variant'}`}>
                           {chat.leadScore}
                         </span>
@@ -430,25 +519,38 @@ const AdminNextZap: React.FC = () => {
           </div>
         </div>
 
-        {/* Main Chat Window */}
-        <div className="flex-1 flex flex-col bg-surface relative">
+        {/* Main Chat Window (Mobile slide-in, Desktop fixed) */}
+        <AnimatePresence mode="wait">
           {selectedChat ? (
-            <>
+            <motion.div 
+              key="chat-window"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="absolute inset-0 z-30 flex flex-col bg-surface lg:static lg:flex-1 lg:h-full lg:z-auto lg:transform-none"
+            >
               {/* Chat Header */}
-              <div className="h-[60px] px-4 flex items-center justify-between bg-surface-container border-b border-outline-variant/10 z-10">
-                <div className="flex items-center gap-3 cursor-pointer">
-                  <div className="w-10 h-10 rounded-full overflow-hidden bg-surface-container-high">
+              <div className="h-[60px] px-4 flex items-center justify-between bg-surface-container border-b border-outline-variant/10 z-10 shrink-0">
+                <div className="flex items-center gap-3 cursor-pointer overflow-hidden">
+                  <button 
+                    onClick={() => setSelectedChat(null)}
+                    className="lg:hidden p-2 -ml-2 rounded-full hover:bg-surface-container-high transition-colors text-on-surface-variant shrink-0"
+                  >
+                    <ArrowLeft size={20} />
+                  </button>
+                  <div className="w-10 h-10 rounded-full overflow-hidden bg-surface-container-high shrink-0">
                     <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover" />
                   </div>
-                  <div className="flex flex-col">
-                    <span className="text-base font-medium text-on-surface">{selectedChat.name}</span>
-                    <span className="text-xs text-on-surface-variant">{selectedChat.id}</span>
+                  <div className="flex flex-col overflow-hidden">
+                    <span className="text-base font-medium text-on-surface truncate pr-2">{selectedChat.name}</span>
+                    <span className="text-xs text-on-surface-variant truncate pr-2">{selectedChat.id}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-5 text-on-surface-variant">
-                  <button className="hover:text-on-surface transition-colors"><Video size={20} /></button>
-                  <button className="hover:text-on-surface transition-colors"><Phone size={18} /></button>
-                  <div className="w-[1px] h-6 bg-surface-container-high mx-1"></div>
+                <div className="flex items-center gap-3 lg:gap-5 text-on-surface-variant shrink-0">
+                  <button className="hover:text-on-surface transition-colors hidden sm:block"><Video size={20} /></button>
+                  <button className="hover:text-on-surface transition-colors hidden sm:block"><Phone size={18} /></button>
+                  <div className="w-[1px] h-6 bg-surface-container-high mx-1 hidden sm:block"></div>
                   <button className="hover:text-on-surface transition-colors"><Search size={20} /></button>
                   <button className="hover:text-on-surface transition-colors"><MoreVertical size={20} /></button>
                 </div>
@@ -456,7 +558,7 @@ const AdminNextZap: React.FC = () => {
 
               {/* Messages Area */}
               <div 
-                className="flex-1 overflow-y-auto p-6 space-y-2 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat opacity-90"
+                className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-2 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat opacity-90"
                 style={{ backgroundColor: 'var(--color-surface)', backgroundBlendMode: 'overlay' }}
               >
                 {messages.map((msg, idx) => {
@@ -472,8 +574,8 @@ const AdminNextZap: React.FC = () => {
                         </div>
                       )}
                       <div className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[65%] px-3 py-1.5 rounded-lg relative shadow-sm ${msg.sender === 'me' ? 'bg-primary-container text-on-primary-container rounded-tr-none' : 'bg-surface-container text-on-surface rounded-tl-none'}`}>
-                          <div className="text-sm leading-relaxed pr-12">
+                        <div className={`max-w-[85%] lg:max-w-[65%] px-3 py-1.5 rounded-lg relative shadow-sm ${msg.sender === 'me' ? 'bg-primary-container text-on-primary-container rounded-tr-none' : 'bg-surface-container text-on-surface rounded-tl-none'}`}>
+                          <div className="text-sm leading-relaxed pr-12 break-words">
                             {msg.type === 'image' ? (
                               <img src={msg.text} alt="media" className="max-w-full rounded-lg" onError={(e) => (e.currentTarget.style.display = 'none')} />
                             ) : msg.type === 'video' ? (
@@ -481,23 +583,23 @@ const AdminNextZap: React.FC = () => {
                             ) : msg.type === 'audio' ? (
                               <div className="flex flex-col gap-2 min-w-[200px]">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
                                     <Phone size={14} className="text-primary" />
                                   </div>
-                                  <span className="text-xs font-medium">Áudio do WhatsApp</span>
+                                  <span className="text-xs font-medium truncate">Áudio</span>
                                   {!msg.transcription && !msg.isTranscribing && (
                                     <button 
                                       onClick={() => transcribeAudio(msg.id)}
                                       className="ml-auto text-[10px] font-bold uppercase tracking-wider text-primary hover:underline"
                                     >
-                                      Transcrever
+                                      Ouvir
                                     </button>
                                   )}
                                 </div>
                                 {msg.isTranscribing && (
                                   <div className="flex items-center gap-2 text-[10px] text-on-surface-variant italic">
-                                    <RefreshCw className="animate-spin" size={10} />
-                                    Transcrevendo com Groq...
+                                    <RefreshCw className="animate-spin shrink-0" size={10} />
+                                    Transcrevendo...
                                   </div>
                                 )}
                                 {msg.transcription && (
@@ -512,7 +614,7 @@ const AdminNextZap: React.FC = () => {
                               msg.text
                             )}
                           </div>
-                          <div className="absolute bottom-1 right-2 flex items-center gap-1">
+                          <div className="absolute bottom-1 right-2 flex items-center gap-1 shrink-0">
                             <span className="text-[10px] opacity-70">
                               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
@@ -531,15 +633,15 @@ const AdminNextZap: React.FC = () => {
               </div>
 
               {/* Input Area */}
-              <div className="min-h-[62px] px-4 py-2 flex items-center gap-3 bg-surface-container z-10">
-                <div className="flex items-center gap-2 text-on-surface-variant">
-                  <button className="p-2 hover:text-on-surface transition-colors"><Smile size={24} /></button>
+              <div className="min-h-[62px] px-2 lg:px-4 py-2 flex items-center gap-2 lg:gap-3 bg-surface-container z-10 shrink-0">
+                <div className="flex items-center gap-1 lg:gap-2 text-on-surface-variant shrink-0">
+                  <button className="p-2 hover:text-on-surface transition-colors hidden sm:block"><Smile size={24} /></button>
                   <button className="p-2 hover:text-on-surface transition-colors"><Paperclip size={24} /></button>
                 </div>
-                <form onSubmit={handleSendMessage} className="flex-1">
+                <form onSubmit={handleSendMessage} className="flex-1 min-w-0">
                   <input 
                     type="text" 
-                    placeholder="Digite uma mensagem"
+                    placeholder="Mensagem"
                     className="w-full bg-surface-container-high border-none rounded-lg px-4 py-2.5 text-sm focus:ring-0 placeholder-on-surface-variant text-on-surface"
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
@@ -547,14 +649,14 @@ const AdminNextZap: React.FC = () => {
                 </form>
                 <button 
                   onClick={() => handleSendMessage()}
-                  className="p-2.5 bg-primary text-on-primary rounded-full hover:bg-primary/90 transition-colors"
+                  className="p-2.5 bg-primary text-on-primary rounded-full hover:bg-primary/90 transition-colors shrink-0"
                 >
                   <Send size={20} />
                 </button>
               </div>
-            </>
+            </motion.div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-surface-container">
+            <div className="flex-1 lg:flex flex-col items-center justify-center p-12 text-center bg-surface-container hidden">
               <div className="w-64 h-64 mb-8 opacity-20">
                 <img src="https://static.whatsapp.net/rsrc.php/v3/y6/r/wa669ae5z23.png" alt="WhatsApp Web" className="w-full h-full object-contain" />
               </div>
@@ -568,97 +670,105 @@ const AdminNextZap: React.FC = () => {
               </div>
             </div>
           )}
-        </div>
+        </AnimatePresence>
 
-        {/* Right Sidebar: CRM Tools */}
-        {selectedChat && (
-          <div className="w-80 lg:w-96 bg-surface-container-low border-l border-outline-variant/10 flex flex-col overflow-y-auto custom-scrollbar">
-            <div className="h-[60px] px-4 flex items-center bg-surface-container border-b border-outline-variant/10">
-              <span className="font-medium text-on-surface">Dados do Lead</span>
-            </div>
-            
-            <div className="p-6 flex flex-col items-center text-center border-b border-outline-variant/10">
-              <div className="w-24 h-24 rounded-full overflow-hidden mb-4 bg-surface-container-high">
-                <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover" />
+        {/* Right Sidebar: CRM Tools (Desliza e sobrepõe ou fica fixa no lg) */}
+        <AnimatePresence>
+          {selectedChat && (
+            <motion.div 
+              initial={{ x: '100%', opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: '100%', opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="hidden lg:flex w-80 xl:w-96 bg-surface-container-low border-l border-outline-variant/10 flex-col overflow-y-auto custom-scrollbar shrink-0"
+            >
+              <div className="h-[60px] px-4 flex items-center shrink-0 bg-surface-container border-b border-outline-variant/10">
+                <span className="font-medium text-on-surface">Dados do Lead</span>
               </div>
-              <h3 className="text-lg font-medium text-on-surface">{selectedChat.name}</h3>
-              <p className="text-sm text-on-surface-variant">{selectedChat.id}</p>
               
-              <div className="flex gap-4 mt-6">
-                <button className="flex flex-col items-center gap-1 group">
-                  <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
-                    <Star size={18} className="text-primary" />
-                  </div>
-                  <span className="text-[10px] text-on-surface-variant">Favorito</span>
-                </button>
-                <button className="flex flex-col items-center gap-1 group">
-                  <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
-                    <Archive size={18} className="text-primary" />
-                  </div>
-                  <span className="text-[10px] text-on-surface-variant">Arquivar</span>
-                </button>
-                <button className="flex flex-col items-center gap-1 group">
-                  <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors text-error">
-                    <Trash2 size={18} />
-                  </div>
-                  <span className="text-[10px] text-on-surface-variant">Excluir</span>
-                </button>
+              <div className="p-6 flex flex-col items-center text-center border-b border-outline-variant/10">
+                <div className="w-24 h-24 rounded-full overflow-hidden mb-4 bg-surface-container-high shrink-0">
+                  <img src={selectedChat.avatar} alt={selectedChat.name} className="w-full h-full object-cover" />
+                </div>
+                <h3 className="text-lg font-medium text-on-surface w-full truncate">{selectedChat.name}</h3>
+                <p className="text-sm text-on-surface-variant w-full truncate">{selectedChat.id}</p>
+                
+                <div className="flex gap-4 mt-6">
+                  <button className="flex flex-col items-center gap-1 group">
+                    <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
+                      <Star size={18} className="text-primary" />
+                    </div>
+                    <span className="text-[10px] text-on-surface-variant">Favorito</span>
+                  </button>
+                  <button className="flex flex-col items-center gap-1 group">
+                    <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
+                      <Archive size={18} className="text-primary" />
+                    </div>
+                    <span className="text-[10px] text-on-surface-variant">Arquivar</span>
+                  </button>
+                  <button className="flex flex-col items-center gap-1 group">
+                    <div className="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors text-error">
+                      <Trash2 size={18} />
+                    </div>
+                    <span className="text-[10px] text-on-surface-variant">Excluir</span>
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div className="p-4 space-y-6">
-              {/* CRM Info */}
-              <div>
-                <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-4">Informações CRM</h4>
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-on-surface-variant uppercase">Status do Funil</label>
-                    <select className="bg-surface-container border-none rounded text-sm py-1.5 focus:ring-1 focus:ring-primary text-on-surface">
-                      <option>Novo Lead</option>
-                      <option>Em Negociação</option>
-                      <option>Aguardando Pagamento</option>
-                      <option>Cliente Ativo</option>
-                      <option>Perdido</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[10px] text-on-surface-variant uppercase">Tags</label>
-                    <div className="flex flex-wrap gap-2 mt-1">
-                      <span className="bg-primary-container text-on-primary-container text-[10px] px-2 py-0.5 rounded-full">Web Design</span>
-                      <span className="bg-surface-container-high text-on-surface text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Plus size={10} /> Adicionar
-                      </span>
+              <div className="p-4 space-y-6 flex-1">
+                {/* CRM Info */}
+                <div>
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-4">Informações CRM</h4>
+                  <div className="space-y-4">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-on-surface-variant uppercase">Status do Funil</label>
+                      <select className="bg-surface-container border-none rounded text-sm py-1.5 focus:ring-1 focus:ring-primary text-on-surface w-full">
+                        <option>Novo Lead</option>
+                        <option>Em Negociação</option>
+                        <option>Aguardando Pagamento</option>
+                        <option>Cliente Ativo</option>
+                        <option>Perdido</option>
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] text-on-surface-variant uppercase">Tags</label>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        <span className="bg-primary-container text-on-primary-container text-[10px] px-2 py-0.5 rounded-full">Web Design</span>
+                        <span className="bg-surface-container-high text-on-surface text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 hover:bg-surface-container transition-colors cursor-pointer">
+                          <Plus size={10} /> Adicionar
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Notes */}
-              <div>
-                <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-4">Anotações</h4>
-                <textarea 
-                  placeholder="Adicione uma nota sobre este lead..."
-                  className="w-full bg-surface-container border-none rounded-lg text-sm p-3 focus:ring-1 focus:ring-primary min-h-[100px] placeholder-on-surface-variant text-on-surface"
-                ></textarea>
-              </div>
+                {/* Notes */}
+                <div>
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-4">Anotações</h4>
+                  <textarea 
+                    placeholder="Adicione uma nota sobre este lead..."
+                    className="w-full bg-surface-container border-none rounded-lg text-sm p-3 focus:ring-1 focus:ring-primary min-h-[100px] placeholder-on-surface-variant text-on-surface"
+                  ></textarea>
+                </div>
 
-              {/* Quick Tools */}
-              <div>
-                <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-4">Ferramentas Rápidas</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <button className="p-3 bg-surface-container rounded-lg hover:bg-surface-container-high transition-colors flex flex-col items-center gap-2 text-on-surface">
-                    <FileText size={20} className="text-on-surface-variant" />
-                    <span className="text-[10px]">Proposta</span>
-                  </button>
-                  <button className="p-3 bg-surface-container rounded-lg hover:bg-surface-container-high transition-colors flex flex-col items-center gap-2 text-on-surface">
-                    <Clock size={20} className="text-on-surface-variant" />
-                    <span className="text-[10px]">Agendar</span>
-                  </button>
+                {/* Quick Tools */}
+                <div>
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-4">Ferramentas Rápidas</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button className="p-3 bg-surface-container rounded-lg hover:bg-surface-container-high transition-colors flex flex-col items-center gap-2 text-on-surface">
+                      <FileText size={20} className="text-on-surface-variant" />
+                      <span className="text-[10px]">Proposta</span>
+                    </button>
+                    <button className="p-3 bg-surface-container rounded-lg hover:bg-surface-container-high transition-colors flex flex-col items-center gap-2 text-on-surface">
+                      <Clock size={20} className="text-on-surface-variant" />
+                      <span className="text-[10px]">Agendar</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
       <style>{`

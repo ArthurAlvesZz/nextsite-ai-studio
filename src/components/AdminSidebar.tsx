@@ -22,15 +22,15 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
     <>
       {isOpen && (
         <div 
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 md:hidden"
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 lg:hidden"
           onClick={onClose}
         />
       )}
-      <aside className={`h-screen w-64 fixed left-0 top-0 border-r border-white/10 bg-[#050505] md:bg-white/[0.02] backdrop-blur-2xl flex flex-col py-8 z-50 transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      <aside className={`h-[100dvh] w-64 fixed left-0 top-0 border-r border-white/10 bg-[#050505] lg:bg-white/[0.02] backdrop-blur-2xl flex flex-col py-8 z-50 transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
         {isOpen && (
           <button 
             onClick={onClose}
-            className="md:hidden absolute top-6 right-6 text-white/50 hover:text-white"
+            className="lg:hidden absolute top-6 right-6 text-white/50 hover:text-white"
           >
             <span className="material-symbols-outlined">close</span>
           </button>

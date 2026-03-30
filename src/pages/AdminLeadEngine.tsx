@@ -3,7 +3,7 @@ import AdminSidebar from '../components/AdminSidebar';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from '../firebase';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Filter, Download, MoreHorizontal, ArrowUpRight, ChevronRight, Zap, Users, Target, BarChart3, MessageSquare, Phone, Mail, Globe, MapPin, Calendar, Clock, CheckCircle2, AlertCircle, Loader2, Settings, TrendingUp, PieChart as PieChartIcon, Briefcase, Star, ShoppingBag, Megaphone, Send, Plus, Activity, Cpu, Zap as Bolt, X, Info, ChevronDown, MessageCircle } from 'lucide-react';
 import { LeadColhido } from '../types/lead';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
@@ -41,7 +41,10 @@ const priorityProspects = [
 
 export default function AdminLeadEngine() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'overview' | 'leads' | 'scrapers' | 'templates' | 'settings'>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab');
+  const activeTab = (rawTab === 'leads' || rawTab === 'scrapers' || rawTab === 'templates' || rawTab === 'settings') ? rawTab as 'overview' | 'leads' | 'scrapers' | 'templates' | 'settings' : 'overview';
+  const setActiveTab = (tab: string) => setSearchParams({ tab });
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
@@ -65,17 +68,21 @@ export default function AdminLeadEngine() {
     global: { enginesRunning: 3, lastSync: "2m ago" }
   });
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showNewJobModal, setShowNewJobModal] = useState<'shopify' | null>(null);
+  const [jobUrlsInput, setJobUrlsInput] = useState('');
   const [isShopifyScannerRunning, setIsShopifyScannerRunning] = useState(false);
+  const [scraperLogs, setScraperLogs] = useState<string[]>([]);
+  const [showLogsModal, setShowLogsModal] = useState(false);
 
-  const handleStartShopifyScanner = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const submitScraperJob = async () => {
+    if (!jobUrlsInput.trim()) return;
+    setShowNewJobModal(null);
     setIsShopifyScannerRunning(true);
+    setScraperLogs(["[SYSTEM] Iniciando motor remoto... aguardando alocação do scraper..."]);
+    setShowLogsModal(true);
     
     try {
-      const text = await file.text();
-      const urls = text.split('\n').map(url => url.trim()).filter(url => url && url.startsWith('http'));
+      const urls = jobUrlsInput.split('\n').map(url => url.trim()).filter(url => url && url.startsWith('http'));
 
       const user = auth.currentUser;
       const token = user ? await user.getIdToken() : '';
@@ -89,24 +96,57 @@ export default function AdminLeadEngine() {
         body: JSON.stringify({ urls })
       });
       
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro ao rodar scraper');
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Falha ao iniciar motor remoto');
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalResults = null;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (value) {
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.trim()) {
+                try {
+                  const event = JSON.parse(line);
+                  if (event.type === 'log') {
+                    setScraperLogs(prev => [...prev, event.text]);
+                  } else if (event.type === 'done') {
+                    if (event.success) finalResults = event.results;
+                    else throw new Error(event.error);
+                  }
+                } catch(e) {}
+              }
+            }
+          }
+          if (done) break;
+        }
+      }
       
-      alert(`Scraper finalizado! ${data.results?.length || 0} lojas processadas com sucesso.`);
-      
-      // Download the result as JSON
-      const blob = new Blob([JSON.stringify(data.results, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `shopify_leads_${Date.now()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      if (finalResults) {
+        setScraperLogs(prev => [...prev, `\n[SYSTEM] Scraper finalizado com sucesso! ${finalResults.length} resultados.`]);
+        // Download the result as JSON
+        const blob = new Blob([JSON.stringify(finalResults, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `shopify_leads_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
     } catch(err: any) {
-      alert("Erro no scraper: " + err.message);
+      setScraperLogs(prev => [...prev, `\n[ERRO CRÍTICO] ${err.message}`]);
     } finally {
       setIsShopifyScannerRunning(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setJobUrlsInput('');
     }
   };
 
@@ -948,9 +988,8 @@ export default function AdminLeadEngine() {
                       ))}
                     </div>
                     <div className="flex items-center gap-3">
-                      <input type="file" accept=".txt,.csv" ref={fileInputRef} onChange={handleStartShopifyScanner} className="hidden" />
                       <button 
-                        onClick={() => !isShopifyScannerRunning && fileInputRef.current?.click()}
+                        onClick={() => !isShopifyScannerRunning && setShowNewJobModal('shopify')}
                         disabled={isShopifyScannerRunning}
                         className={`flex-1 ${isShopifyScannerRunning ? 'bg-amber-400/10 text-amber-400 border-amber-400/20 cursor-wait' : 'bg-secondary/10 text-secondary border-secondary/20 hover:bg-secondary/20'} py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors border`}
                       >
@@ -1476,6 +1515,98 @@ export default function AdminLeadEngine() {
                     Conectado com Sucesso!
                   </div>
                 )}
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* New Scanner Job Modal */}
+        <AnimatePresence>
+          {showNewJobModal === 'shopify' && (
+            <div className="fixed inset-0 z-[105] flex items-center justify-center p-6">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowNewJobModal(null)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+              <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative bg-[#0a0a0a] border border-white/10 p-8 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col">
+                <div className="flex justify-between items-center mb-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-secondary/10 flex items-center justify-center border border-secondary/30">
+                      <ShoppingBag className="w-6 h-6 text-secondary" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-white">Configurar Shopify Scanner</h2>
+                      <p className="text-xs text-white/40 uppercase tracking-widest mt-1">Insira as URLs alvo para varredura</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setShowNewJobModal(null)} className="text-white/30 hover:text-white transition-colors bg-white/5 hover:bg-white/10 p-2 rounded-xl">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-[10px] font-bold text-white/40 uppercase tracking-widest mb-3">URLs (Uma por linha)</label>
+                    <textarea 
+                      value={jobUrlsInput}
+                      onChange={(e) => setJobUrlsInput(e.target.value)}
+                      placeholder="https://loja1.com&#10;https://loja2.com"
+                      className="w-full h-48 bg-white/[0.02] border border-white/10 rounded-xl p-4 text-sm text-white font-mono leading-relaxed focus:border-secondary/50 focus:outline-none focus:ring-1 focus:ring-secondary/50 resize-none shadow-inner"
+                    />
+                  </div>
+                  
+                  <div className="bg-secondary/5 border border-secondary/20 rounded-xl p-5 flex gap-4">
+                    <Info className="w-5 h-5 text-secondary shrink-0" />
+                    <p className="text-xs text-white/60 leading-relaxed">
+                      O robô irá iterar por todas as URLs processando as métricas e o <strong className="text-emerald-400">Score de Qualificação</strong> de forma inteligente. Ao iniciar, você acompanha o log rodando em tempo real.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-8 flex justify-end gap-3 border-t border-white/10 pt-6">
+                  <button 
+                    onClick={() => setShowNewJobModal(null)} 
+                    className="px-6 py-3 rounded-xl font-bold text-sm text-white/40 hover:text-white hover:bg-white/5 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={submitScraperJob}
+                    disabled={!jobUrlsInput.trim() || isShopifyScannerRunning}
+                    className="px-8 py-3 rounded-xl bg-secondary text-black font-bold text-sm shadow-[0_0_20px_rgba(233,179,255,0.3)] transition-all flex items-center gap-2 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  >
+                    <Zap className="w-4 h-4 fill-black" />
+                    INICIAR VARREDURA ASSÍNCRONA
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Scraper Logs Terminal Modal */}
+        <AnimatePresence>
+          {showLogsModal && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !isShopifyScannerRunning && setShowLogsModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+              <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative bg-[#0a0a0a] border border-white/10 p-6 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[75vh]">
+                <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex gap-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-red-500/80 shadow-[0_0_10px_rgba(239,68,68,0.3)]"></div>
+                      <div className="w-3.5 h-3.5 rounded-full bg-amber-500/80 shadow-[0_0_10px_rgba(245,158,11,0.3)]"></div>
+                      <div className="w-3.5 h-3.5 rounded-full bg-emerald-500/80 shadow-[0_0_10px_rgba(16,185,129,0.3)]"></div>
+                    </div>
+                    <span className="text-sm font-mono text-white/50 bg-white/5 px-4 py-1.5 rounded-full font-medium">shopify_core_engine.py — Terminal</span>
+                  </div>
+                  <button onClick={() => setShowLogsModal(false)} className="text-white/30 hover:text-white transition-colors bg-white/5 hover:bg-white/10 p-2 rounded-xl">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto bg-black border border-white/5 rounded-2xl p-6 font-mono text-sm leading-relaxed text-emerald-400/90 space-y-2 shadow-inner">
+                  {scraperLogs.map((log, i) => (
+                    <div key={i} className={`${log.includes('[ERRO') ? 'text-red-400' : log.includes('hot') ? 'text-amber-400 font-bold' : ''}`}>{log}</div>
+                  ))}
+                  {isShopifyScannerRunning && <div className="text-emerald-400 animate-pulse mt-4">_</div>}
+                  <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />
+                </div>
               </motion.div>
             </div>
           )}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot, query, orderBy, updateDoc, doc, addDoc, Timestamp, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -9,6 +10,8 @@ import { useAuth } from '../hooks/useAuth';
 import { LeadColhido, LeadStatus, NICHOS } from '../types/lead';
 
 export default function AdminCRM() {
+  usePageTitle('CRM & Leads');
+
   const [leads, setLeads] = useState<LeadColhido[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -63,7 +66,7 @@ export default function AdminCRM() {
   ];
 
   const leadsByStatus = useMemo(() => {
-    const grouped: Record<LeadStatus, LeadColhido[]> = {
+    const grouped: Record<string, LeadColhido[]> = {
       novo: [],
       contatado: [],
       negociacao: [],
@@ -235,9 +238,19 @@ export default function AdminCRM() {
 
       <AdminSidebar activePage="dashboard" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
-        <header className="w-full h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-10 shrink-0">
-          <GlobalSearch />
+      <main className="lg:ml-64 w-full flex-1 min-[100dvh] relative flex flex-col h-screen overflow-hidden">
+        <header className="w-full h-20 lg:h-24 z-40 bg-[#050505]/80 backdrop-blur-2xl border-b border-white/10 flex justify-between items-center px-4 lg:px-10 shrink-0">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="lg:hidden text-white/60 hover:text-white transition-colors mt-1"
+            >
+              <span className="material-symbols-outlined text-3xl">menu</span>
+            </button>
+            <div className="hidden sm:block">
+              <GlobalSearch />
+            </div>
+          </div>
           <div className="flex items-center gap-6">
             <button className="relative text-white/60 hover:text-white transition-colors">
               <span className="material-symbols-outlined">notifications</span>
@@ -253,8 +266,8 @@ export default function AdminCRM() {
           </div>
         </header>
 
-        <div className="flex-1 p-10 overflow-hidden flex flex-col">
-          <div className="flex justify-between items-end mb-8 shrink-0">
+        <div className="flex-1 p-4 lg:p-10 pb-6 overflow-hidden flex flex-col">
+          <div className="flex justify-between items-end mb-6 lg:mb-8 shrink-0">
             <div>
               <h2 className="text-4xl md:text-5xl font-headline font-extrabold tracking-tighter text-white mb-3">
                 CRM & Leads
@@ -270,10 +283,10 @@ export default function AdminCRM() {
               <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
             </div>
           ) : (
-            <div className="flex-1 overflow-x-auto pb-4">
-              <div className="flex gap-6 h-full min-w-max">
+            <div className="flex-1 overflow-x-auto pb-6 -mx-4 px-4 lg:mx-0 lg:px-0 custom-scrollbar snap-x snap-mandatory flex w-full">
+              <div className="flex gap-4 lg:gap-6 h-full min-w-max">
                 {columns.map(column => (
-                  <div key={column.id} className="w-80 flex flex-col bg-white/[0.02] border border-white/5 rounded-2xl p-4">
+                  <div key={column.id} className="w-[85vw] sm:w-[50vw] lg:w-80 flex-shrink-0 snap-center flex flex-col bg-white/[0.02] border border-white/5 rounded-2xl p-4 h-full">
                     <div className="flex items-center justify-between mb-4 px-2">
                       <h3 className={`text-sm font-bold uppercase tracking-widest ${column.color}`}>{column.title}</h3>
                       <span className="bg-white/10 text-white text-xs px-2 py-0.5 rounded-full">
