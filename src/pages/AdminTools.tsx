@@ -10,14 +10,8 @@ export default function AdminTools() {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Route Protection
-  useEffect(() => {
-    if (!authLoading && adminProfile) {
-      if (adminProfile.role?.toLowerCase() !== 'owner') {
-        navigate('/admin/dashboard', { replace: true });
-      }
-    }
-  }, [adminProfile, authLoading, navigate]);
+  // AdminTools is now accessible to all authorized roles (Editor, Vendedor, Owner)
+  // as it contains company manuals and shared tools.
 
   const manuals = [
     {
@@ -53,7 +47,7 @@ export default function AdminTools() {
     { name: 'Color Palettes', icon: 'palette', color: 'text-secondary/70' }
   ];
 
-  if (authLoading || (adminProfile && adminProfile.role !== 'owner')) {
+  if (authLoading) {
     return <div className="min-h-screen bg-[#020202] flex items-center justify-center">
       <div className="w-12 h-12 border-4 border-secondary/20 border-t-secondary rounded-full animate-spin"></div>
     </div>;
