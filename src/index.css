@@ -102,17 +102,20 @@
   .text-gradient-primary {
     background: linear-gradient(135deg, #adc6ff 0%, #4b8eff 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
   }
   .text-gradient-obsidian {
     background: linear-gradient(135deg, #ffffff 0%, #adc6ff 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
   }
   .text-gradient-scan {
     background: linear-gradient(to right, #adc6ff 0%, #e9b3ff 30%, #adc6ff 60%);
     background-size: 200% auto;
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     animation: scan-gradient 3s linear infinite;
   }
@@ -135,9 +138,6 @@
   }
   .watermark-glow {
     filter: drop-shadow(0 0 60px rgba(255, 255, 255, 0.15));
-  }
-  .logo-transparent {
-    /* mix-blend-mode: lighten; - Removed to prevent dark logos from disappearing on dark backgrounds */
   }
   .bg-gradient-radial {
     background-image: radial-gradient(var(--tw-gradient-stops));

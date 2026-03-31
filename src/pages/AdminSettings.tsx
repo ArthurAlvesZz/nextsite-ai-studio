@@ -6,9 +6,9 @@ import GlobalSearch from '../components/GlobalSearch';
 import { useEmployees, TeamMember } from '../hooks/useEmployees';
 import { useAgencySettings, PortfolioCase, WorkflowStep } from '../hooks/useAgencySettings';
 import { useGoalSettings } from '../hooks/useGoalSettings';
-import { auth, db, secondaryAuth } from '../firebase';
-import { createUserWithEmailAndPassword, updatePassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import { updatePassword } from 'firebase/auth';
+import { doc } from 'firebase/firestore';
 
 export default function AdminSettings() {
   const { teamMembers, addMember, updateMember, deleteMember } = useEmployees();
@@ -114,20 +114,33 @@ export default function AdminSettings() {
         return;
       }
       try {
-        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, `${formData.login}@nextcreatives.co`, formData.password);
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
-          role: formData.role === 'Admin' ? 'admin' : 'editor',
-          name: formData.name,
-          login: formData.login
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) throw new Error("Acesso negado: Seu login de Admin expirou.");
+
+        const response = await fetch('/api/admin/users/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            name: formData.name,
+            login: formData.login,
+            password: formData.password,
+            role: formData.role.toLowerCase()
+          })
         });
-        await addMember({
-          ...formData,
-          userId: userCredential.user.uid // store the new user's uid
-        });
-        await secondaryAuth.signOut(); // sign out the secondary auth instance
-      } catch (e) {
-        console.error("Erro ao criar usuário no Firebase Auth:", e);
-        alert("Erro ao criar usuário: " + (e instanceof Error ? e.message : 'Erro desconhecido'));
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || "Erro ao processar criação no servidor.");
+        }
+
+        // A lista será atualizada automaticamente pelo onSnapshot no useEmployees()
+      } catch (e: any) {
+        console.error("Erro na criação do acesso:", e);
+        alert("Erro ao criar acesso: " + (e.message || 'Erro inesperado'));
         return;
       }
     }
