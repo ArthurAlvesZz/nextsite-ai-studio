@@ -40,27 +40,32 @@ export function useAuth() {
     // Listen to user profile in Firestore
     const userDocRef = doc(db, 'users', user.uid);
     const unsubscribe = onSnapshot(userDocRef, async (docSnap) => {
+      let finalProfile: AdminProfile | null = null;
+      
       if (docSnap.exists()) {
-        setAdminProfile(docSnap.data() as AdminProfile);
-      } else {
-        // Fallback or default profile if doc doesn't exist
-        let isMaster = user.email === 'arthurfgalves@gmail.com' || user.email === '15599873676@nextcreatives.co';
-        
-        // Check if they are an owner in the employees collection
-        if (!isMaster) {
-          try {
-            const employeeDocRef = doc(db, 'employees', user.uid);
-            const employeeSnap = await getDocs(query(collection(db, 'employees'), where('userId', '==', user.uid)));
-            if (!employeeSnap.empty) {
-              const employeeData = employeeSnap.docs[0].data();
-              if (employeeData.isOwner) {
-                isMaster = true;
-              }
-            }
-          } catch (e) {
-            console.error("Error checking employee owner status:", e);
+        const userData = docSnap.data() as AdminProfile;
+        finalProfile = {
+          ...userData,
+          role: userData.role?.toLowerCase() || 'editor'
+        };
+
+        // Deep check: Ensure the role from the 'employees' collection 
+        // (managed in Settings) overrides the potentially stale 'users' doc role
+        try {
+          const employeeSnap = await getDocs(query(collection(db, 'employees'), where('userId', '==', user.uid)));
+          if (!employeeSnap.empty) {
+            const employeeData = employeeSnap.docs[0].data();
+            finalProfile.role = employeeData.role?.toLowerCase() || finalProfile.role;
+            finalProfile.isOwner = employeeData.isOwner || finalProfile.isOwner;
           }
+        } catch (e) {
+          console.warn("[Auth] Error syncing role from employees:", e);
         }
+        
+        setAdminProfile(finalProfile);
+      } else {
+        // Fallback logic for new users
+        let isMaster = user.email === 'arthurfgalves@gmail.com' || user.email === '15599873676@nextcreatives.co';
 
         const defaultProfile: AdminProfile = {
           name: isMaster ? 'Arthur Fagundes #Owner' : (user.displayName || 'Usuário'),
