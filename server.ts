@@ -1270,6 +1270,115 @@ async function startServer() {
     }
   });
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // ADMIN — Criação segura de funcionários/editores
+  //
+  // Usa Firebase Admin SDK para criar o usuário no Auth sem deslogar o Admin.
+  // Transação segura: se o Firestore falhar, o usuário do Auth é deletado
+  // imediatamente, prevenindo contas "fantasmas".
+  // ════════════════════════════════════════════════════════════════════════════
+  app.post("/api/admin/users/create", requireAdmin, async (req: any, res: any) => {
+    const { name, login, password, role } = req.body ?? {};
+
+    if (!name || !login || !password) {
+      return res.status(400).json({ error: "Nome, login e senha são obrigatórios." });
+    }
+    if (typeof name !== 'string' || typeof login !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: "Campos inválidos." });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: "A senha deve ter pelo menos 6 caracteres." });
+    }
+
+    const sanitizedLogin = login.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (!sanitizedLogin) {
+      return res.status(400).json({ error: "Login inválido. Use apenas letras, números, ponto, hífen ou underscore." });
+    }
+
+    const email = `${sanitizedLogin}@nextcreatives.internal`;
+    const memberRole = (role === 'editor' || role === 'admin') ? role : 'editor';
+
+    let createdUid: string | null = null;
+
+    try {
+      // 1. Cria o usuário no Firebase Auth (sem afetar a sessão do Admin logado)
+      const userRecord = await admin.auth().createUser({
+        email,
+        password,
+        displayName: name.trim(),
+      });
+      createdUid = userRecord.uid;
+
+      // 2. Calcula iniciais
+      const initials = name.trim().split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() || 'NU';
+
+      // 3. Cria o documento no Firestore (employees + users)
+      const db = admin.firestore();
+      const batch = db.batch();
+
+      // Documento na coleção employees (lido pelo useEmployees)
+      const employeeRef = db.collection('employees').doc(createdUid);
+      batch.set(employeeRef, {
+        name: name.trim(),
+        role: memberRole,
+        login: sanitizedLogin,
+        password,               // armazenado para referência do admin
+        initials,
+        lastLogin: 'Nunca',
+        userId: createdUid,
+        isOwner: false,
+        createdAt: new Date().toISOString(),
+        createdBy: req.user.uid,
+      });
+
+      // Documento na coleção users (lido pelo useAuth / requireAdmin)
+      const userRef = db.collection('users').doc(createdUid);
+      batch.set(userRef, {
+        name: name.trim(),
+        role: memberRole,
+        email,
+        userId: createdUid,
+        createdAt: new Date().toISOString(),
+        createdBy: req.user.uid,
+      });
+
+      await batch.commit();
+
+      logger.info(
+        { event: 'ADMIN_USER_CREATED', uid: createdUid, login: sanitizedLogin, role: memberRole, createdBy: req.user.uid },
+        `Novo usuário criado: ${sanitizedLogin}`
+      );
+
+      return res.status(201).json({
+        success: true,
+        uid: createdUid,
+        message: `Acesso criado com sucesso para ${name.trim()}.`,
+      });
+
+    } catch (error: any) {
+      // 4. Rollback: se o Firestore falhar após o Auth já ter criado, deleta o usuário Auth
+      if (createdUid && error?.code !== 'auth/email-already-exists') {
+        try {
+          await admin.auth().deleteUser(createdUid);
+          logger.warn({ event: 'ADMIN_USER_ROLLBACK', uid: createdUid }, 'Usuário Auth deletado após falha no Firestore');
+        } catch (rollbackErr: any) {
+          logger.error({ event: 'ADMIN_USER_ROLLBACK_FAILED', uid: createdUid, err: rollbackErr.message }, 'Falha no rollback do Auth');
+        }
+      }
+
+      // 5. Erros conhecidos com mensagens amigáveis
+      if (error?.code === 'auth/email-already-exists') {
+        return res.status(409).json({ error: `ID de acesso "${sanitizedLogin}" já está em uso. Escolha outro.` });
+      }
+      if (error?.code === 'auth/invalid-password') {
+        return res.status(400).json({ error: "Senha inválida. Mínimo de 6 caracteres." });
+      }
+
+      logger.error({ event: 'ADMIN_USER_CREATE_ERROR', err: error.message, code: error.code }, 'Erro ao criar usuário admin');
+      return res.status(500).json({ error: "Erro interno ao criar acesso. Tente novamente." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
