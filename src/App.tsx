@@ -1383,7 +1383,7 @@ export default function App() {
 
           {/* Protected Admin Routes */}
           <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/settings" element={<ProtectedRoute><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute requireOwner><AdminSettings /></ProtectedRoute>} />
           <Route path="/admin/profile" element={<ProtectedRoute><AdminProfile /></ProtectedRoute>} />
           <Route path="/admin/clients" element={<ProtectedRoute><AdminClients /></ProtectedRoute>} />
           <Route path="/admin/videos" element={<ProtectedRoute><AdminVideos /></ProtectedRoute>} />

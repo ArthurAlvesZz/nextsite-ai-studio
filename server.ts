@@ -1401,6 +1401,7 @@ async function startServer() {
         role: memberRole,
         email,
         userId: createdUid,
+        isOwner: false,
         createdAt: new Date().toISOString(),
         createdBy: req.user.uid,
       });

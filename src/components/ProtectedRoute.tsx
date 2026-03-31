@@ -6,9 +6,10 @@ import SEO from './SEO';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requireAdmin?: boolean;
+  requireOwner?: boolean;
 }
 
-export default function ProtectedRoute({ children, requireAdmin = true }: ProtectedRouteProps) {
+export default function ProtectedRoute({ children, requireAdmin = true, requireOwner = false }: ProtectedRouteProps) {
   const { user, adminProfile, loading } = useAuth();
   const location = useLocation();
 
@@ -25,12 +26,15 @@ export default function ProtectedRoute({ children, requireAdmin = true }: Protec
   }
 
   if (!user) {
-    // Redirect to login but save the current location
     return <Navigate to="/admin" state={{ from: location }} replace />;
   }
 
-  if (requireAdmin && !adminProfile?.isOwner && adminProfile?.role !== 'owner' && adminProfile?.role !== 'admin' && adminProfile?.role !== 'editor' && adminProfile?.role !== 'vendedor') {
-    // If they are logged in but not an authorized role, redirect to admin login or a "not authorized" page
+  // Rota exclusiva para owner: redireciona qualquer não-owner para o dashboard
+  if (requireOwner && adminProfile?.isOwner !== true) {
+    return <Navigate to="/admin/dashboard" replace />;
+  }
+
+  if (requireAdmin && !adminProfile) {
     return <Navigate to="/admin" replace />;
   }
 

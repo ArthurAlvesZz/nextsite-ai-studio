@@ -56,7 +56,7 @@ export function useAuth() {
           if (!employeeSnap.empty) {
             const employeeData = employeeSnap.docs[0].data();
             finalProfile.role = employeeData.role?.toLowerCase() || finalProfile.role;
-            finalProfile.isOwner = employeeData.isOwner || finalProfile.isOwner;
+            finalProfile.isOwner = !!employeeData.isOwner;
           }
         } catch (e) {
           console.warn("[Auth] Error syncing role from employees:", e);
