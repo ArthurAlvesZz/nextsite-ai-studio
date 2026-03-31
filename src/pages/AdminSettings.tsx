@@ -21,8 +21,8 @@ export default function AdminSettings() {
   // Route Protection
   React.useEffect(() => {
     if (!authLoading && adminProfile) {
-      if (adminProfile.role !== 'admin' && !adminProfile.isOwner) {
-        navigate('/admin/dashboard');
+      if (adminProfile.role !== 'owner') {
+        navigate('/admin/dashboard', { replace: true });
       }
     }
   }, [adminProfile, authLoading, navigate]);

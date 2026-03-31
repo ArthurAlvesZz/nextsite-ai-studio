@@ -65,11 +65,12 @@ service cloud.firestore {
     // ================================================================
     // SETTINGS — Configurações da agência e dados da landing page
     //
-    // Leitura: 'global' é pública (landing page). Demais docs: autenticado.
-    // ESCRITA: somente owner. Nenhum editor ou admin altera configurações.
+    // Leitura: 'global' é pública (landing page). TODOS os outros docs
+    //          são exclusivos do owner — nem admin/editor acessa.
+    // ESCRITA: somente owner.
     // ================================================================
     match /settings/{settingId} {
-      allow read: if settingId == 'global' || isAdminOrEditor();
+      allow read:  if settingId == 'global' || isOwnerRole();
       allow write: if isOwnerRole();
     }
 
@@ -240,18 +241,19 @@ service cloud.firestore {
 
     // ================================================================
     // VIDEO PIPELINE RUNS — Logs de execução do pipeline de vídeo
-    // Apenas owner e admin (operacional). Editores não têm acesso.
+    // Ferramenta exclusiva do owner. Admin/editor não tem acesso.
     // ================================================================
     match /videoPipelineRuns/{runId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isOwnerRole();
     }
 
     // ================================================================
     // SCRAPER METADATA — Status e progresso do scraper de leads
-    // Leitura: admin (para o painel). Escrita: somente servidor (Admin SDK).
+    // Leitura e escrita: somente owner (ferramenta de prospecção).
+    // Escrita direta do cliente bloqueada — usa Admin SDK no servidor.
     // ================================================================
     match /scraper_metadata/{docId} {
-      allow read:  if isAdmin();
+      allow read:  if isOwnerRole();
       allow write: if false;
     }
 

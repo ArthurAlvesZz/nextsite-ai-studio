@@ -8,7 +8,7 @@ export interface AdminProfile {
   name: string;
   phone: string;
   avatarUrl: string;
-  role?: 'admin' | 'editor' | 'vendedor' | string;
+  role?: 'owner' | 'admin' | 'editor' | 'vendedor' | string;
   password?: string;
   email?: string;
   googleLinked?: boolean;
@@ -66,7 +66,7 @@ export function useAuth() {
           name: isMaster ? 'Arthur Fagundes #Owner' : (user.displayName || 'Usuário'),
           phone: isMaster ? '15599873676' : (user.phoneNumber || ''),
           avatarUrl: user.photoURL || '',
-          role: isMaster ? 'admin' : 'editor',
+          role: isMaster ? 'owner' : 'editor',
           email: user.email || '',
           userId: user.uid,
           isOwner: isMaster
@@ -85,7 +85,7 @@ export function useAuth() {
             if (snap.empty) {
               setDoc(employeeDocRef, {
                 name: 'Arthur Fagundes #Owner',
-                role: 'Admin',
+                role: 'Owner',
                 login: '15599873676',
                 password: '963369',
                 userId: user.uid,

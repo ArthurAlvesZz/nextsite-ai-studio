@@ -29,7 +29,7 @@ export default function ProtectedRoute({ children, requireAdmin = true }: Protec
     return <Navigate to="/admin" state={{ from: location }} replace />;
   }
 
-  if (requireAdmin && !adminProfile?.isOwner && adminProfile?.role !== 'admin' && adminProfile?.role !== 'editor' && adminProfile?.role !== 'vendedor') {
+  if (requireAdmin && !adminProfile?.isOwner && adminProfile?.role !== 'owner' && adminProfile?.role !== 'admin' && adminProfile?.role !== 'editor' && adminProfile?.role !== 'vendedor') {
     // If they are logged in but not an authorized role, redirect to admin login or a "not authorized" page
     return <Navigate to="/admin" replace />;
   }

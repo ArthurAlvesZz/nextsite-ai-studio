@@ -1,11 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import SEO from '../components/SEO';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import { motion } from 'motion/react';
+import { useAuth } from '../hooks/useAuth';
 
 export default function AdminTools() {
+  const { adminProfile, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Route Protection
+  useEffect(() => {
+    if (!authLoading && adminProfile) {
+      if (adminProfile.role !== 'owner') {
+        navigate('/admin/dashboard', { replace: true });
+      }
+    }
+  }, [adminProfile, authLoading, navigate]);
+
   const manuals = [
     {
       title: 'Manual de Cultura',
@@ -40,23 +53,29 @@ export default function AdminTools() {
     { name: 'Color Palettes', icon: 'palette', color: 'text-secondary/70' }
   ];
 
+  if (authLoading || (adminProfile && adminProfile.role !== 'owner')) {
+    return <div className="min-h-screen bg-[#020202] flex items-center justify-center">
+      <div className="w-12 h-12 border-4 border-secondary/20 border-t-secondary rounded-full animate-spin"></div>
+    </div>;
+  }
+
   return (
     <div className="min-h-screen bg-[#020202] text-white font-body selection:bg-secondary selection:text-on-secondary flex">
       <SEO title="Ferramentas" />
       <AdminSidebar activePage="tools" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
-      <main className="md:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
+      <main className="lg:ml-64 w-full flex-1 min-h-screen relative flex flex-col">
         {/* Decorative Background Elements */}
         <div className="fixed bottom-0 right-0 w-[500px] h-[500px] bg-secondary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
         <div className="fixed top-0 right-0 w-[300px] h-[300px] bg-primary/5 blur-[100px] rounded-full -z-10 pointer-events-none"></div>
 
-        <div className="pt-32 pb-20 px-12 max-w-7xl mx-auto w-full">
+        <div className="pt-32 pb-20 px-6 lg:px-12 max-w-7xl mx-auto w-full">
           {/* Hero Section */}
           <section className="mb-24 max-w-4xl">
             <motion.h1 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="text-7xl font-extrabold tracking-tighter text-white font-headline mb-8 leading-[1.05]"
+              className="text-5xl lg:text-7xl font-extrabold tracking-tighter text-white font-headline mb-8 leading-[1.05]"
             >
               Central de Recursos <br/>
               <span className="font-serif italic text-secondary font-light">& Ferramentas</span>
@@ -65,7 +84,7 @@ export default function AdminTools() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="text-xl text-white/40 font-light max-w-2xl leading-relaxed"
+              className="text-lg lg:text-xl text-white/40 font-light max-w-2xl leading-relaxed"
             >
               Tudo o que a equipe precisa para produzir com excelência. Acesse diretrizes, ferramentas externas e bibliotecas de ativos.
             </motion.p>
@@ -117,7 +136,7 @@ export default function AdminTools() {
               <div className="h-px flex-1 bg-gradient-to-r from-white/5 to-transparent"></div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
               {tools.map((tool, index) => (
                 <motion.div
                   key={tool.name}
@@ -141,7 +160,6 @@ export default function AdminTools() {
             </div>
           </section>
         </div>
-
       </main>
     </div>
   );

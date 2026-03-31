@@ -421,6 +421,19 @@ async function startServer() {
     message: { error: 'Limite de busca de leads atingido. Tente novamente em 1 minuto.' }
   });
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // RBAC — Guardas de prefixo de rota (owner-only)
+  //
+  // Qualquer rota sob /api/settings/* ou /api/tools/* exige role owner.
+  // O app.use() registra o middleware ANTES dos handlers específicos,
+  // bloqueando o acesso antes mesmo de chegar à lógica de negócio.
+  // /api/admin/users/* também está coberto — garantia dupla sobre a rota
+  // de criação de usuários que já usa requireOwner individualmente.
+  // ════════════════════════════════════════════════════════════════════════════
+  app.use('/api/settings', requireOwner);
+  app.use('/api/tools',    requireOwner);
+  app.use('/api/admin',    requireOwner);
+
   // API Health Check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -1195,7 +1208,7 @@ async function startServer() {
   });
 
   // Lead Engine: Run Shopify Scraper
-  app.post("/api/scrapers/shopify/run", requireAdmin, async (req: any, res) => {
+  app.post("/api/scrapers/shopify/run", requireOwner, async (req: any, res) => {
     try {
       const { urls } = req.body;
       if (!urls || urls.length === 0) {
