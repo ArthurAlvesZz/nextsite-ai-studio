@@ -137,7 +137,7 @@
     filter: drop-shadow(0 0 60px rgba(255, 255, 255, 0.15));
   }
   .logo-transparent {
-    mix-blend-mode: lighten;
+    /* mix-blend-mode: lighten; - Removed to prevent dark logos from disappearing on dark backgrounds */
   }
   .bg-gradient-radial {
     background-image: radial-gradient(var(--tw-gradient-stops));
