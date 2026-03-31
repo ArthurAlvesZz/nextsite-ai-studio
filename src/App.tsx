@@ -48,7 +48,9 @@ import {
   Bookmark
 } from 'lucide-react';
 
-const LOGO_URL = "/logo.png";
+import logo from './assets/logo.png';
+
+const LOGO_URL = logo;
 
 gsap.registerPlugin(ScrollTrigger, TextPlugin);
 

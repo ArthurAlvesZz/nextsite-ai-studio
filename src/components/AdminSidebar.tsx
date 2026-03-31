@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import logo from '../assets/logo.png';
 import { useAuth } from '../hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -38,10 +39,9 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
         <div className="px-8 mb-12 flex flex-col items-start gap-4">
         <div className="flex items-center gap-4">
           <img 
-            className="h-8 object-contain logo-transparent" 
+            className="h-8 object-contain" 
             alt="Next Creatives Logo" 
-            src="/logo.png"
-            referrerPolicy="no-referrer"
+            src={logo}
           />
         </div>
         <div className="flex flex-col gap-1 ml-1">

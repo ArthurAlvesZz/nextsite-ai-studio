@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import logo from '../assets/logo.png';
 
 export default function ClientLogin() {
   const navigate = useNavigate();
@@ -91,10 +92,9 @@ export default function ClientLogin() {
           <div className="flex flex-col items-center mb-10">
             <div className="w-24 h-24 mb-6 rounded-3xl overflow-hidden bg-white/[0.02] border border-white/10 flex items-center justify-center shadow-2xl shadow-secondary/10 group p-4">
               <img 
-                src="/logo.png" 
+                src={logo} 
                 alt="Next Creatives Logo" 
                 className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500"
-                referrerPolicy="no-referrer"
               />
             </div>
             <h1 className="text-3xl font-black tracking-[0.1em] text-center uppercase font-headline bg-gradient-to-r from-secondary to-primary bg-clip-text text-transparent">

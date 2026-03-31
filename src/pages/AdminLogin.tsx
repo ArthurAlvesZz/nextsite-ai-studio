@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { doc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import logo from '../assets/logo.png';
 
 export default function AdminLogin() {
   const [accessId, setAccessId] = useState('');
@@ -192,9 +193,8 @@ export default function AdminLogin() {
           <div className="flex flex-col items-center mb-10">
             <img 
               alt="Next Creatives Corporate Logo" 
-              className="h-12 md:h-14 object-contain logo-transparent mb-6" 
-              src="/logo.png"
-              referrerPolicy="no-referrer"
+              className="h-12 md:h-14 object-contain mb-6" 
+              src={logo}
             />
             <h1 className="font-headline text-3xl md:text-4xl font-extrabold tracking-tighter leading-[1.05] bg-clip-text text-transparent bg-[linear-gradient(to_right,#ffffff,rgba(255,255,255,0.8),#adc6ff,#e9b3ff,#ffffff)] bg-[length:200%_auto] text-center">
               Admin Terminal

@@ -1,5 +1,5 @@
-import React from 'react';
 import { Link } from 'react-router-dom';
+import logo from '../assets/logo.png';
 
 interface ClientSidebarProps {
   activePage: 'dashboard' | 'projects' | 'purchases' | 'settings';
@@ -29,9 +29,8 @@ export default function ClientSidebar({ activePage, isOpen = false, onClose }: C
         <div className="flex items-center gap-3 mb-4">
           <img 
             alt="Next Creatives Logo" 
-            className="h-8 object-contain logo-transparent" 
-            src="/logo.png" 
-            referrerPolicy="no-referrer"
+            className="h-8 object-contain" 
+            src={logo} 
           />
         </div>
         <div className="flex items-center gap-2 ml-1">
