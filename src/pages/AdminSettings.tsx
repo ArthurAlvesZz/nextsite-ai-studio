@@ -21,7 +21,8 @@ export default function AdminSettings() {
   // Route Protection
   useEffect(() => {
     if (!authLoading && adminProfile) {
-      if (adminProfile.role?.toLowerCase() !== 'owner') {
+      const role = adminProfile.role?.toLowerCase();
+      if (role !== 'owner' && role !== 'admin' && !adminProfile.isOwner) {
         navigate('/admin/dashboard', { replace: true });
       }
     }
