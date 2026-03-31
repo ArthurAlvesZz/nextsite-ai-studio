@@ -13,7 +13,7 @@ export default function AdminTools() {
   // Route Protection
   useEffect(() => {
     if (!authLoading && adminProfile) {
-      if (adminProfile.role !== 'owner') {
+      if (adminProfile.role?.toLowerCase() !== 'owner') {
         navigate('/admin/dashboard', { replace: true });
       }
     }

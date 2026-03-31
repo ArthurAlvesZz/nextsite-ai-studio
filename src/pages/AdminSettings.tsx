@@ -19,9 +19,9 @@ export default function AdminSettings() {
   const navigate = useNavigate();
 
   // Route Protection
-  React.useEffect(() => {
+  useEffect(() => {
     if (!authLoading && adminProfile) {
-      if (adminProfile.role !== 'owner') {
+      if (adminProfile.role?.toLowerCase() !== 'owner') {
         navigate('/admin/dashboard', { replace: true });
       }
     }

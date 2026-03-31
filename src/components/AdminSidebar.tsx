@@ -96,7 +96,7 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
           <span className="material-symbols-outlined text-lg">movie_filter</span>
           <span className="font-headline font-bold text-xs uppercase tracking-widest">Vídeos</span>
         </Link>
-        {(!loading && adminProfile?.role?.toLowerCase() === 'owner') && (
+        {adminProfile?.role?.toLowerCase() === 'owner' && (
           <>
             <div className="px-6 py-4 text-[9px] text-white/40 font-medium uppercase tracking-widest">Administração</div>
             <Link 
@@ -172,7 +172,7 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
                 {adminProfile?.name || 'Carregando...'}
               </div>
               <div className="text-[9px] text-white/40 font-medium uppercase tracking-widest">
-                {(adminProfile?.isOwner || adminProfile?.role === 'owner') ? 'Proprietário' : (adminProfile?.role === 'admin' ? 'Administrador' : 'Equipe')}
+                {adminProfile?.role?.toUpperCase() || (adminProfile?.isOwner ? 'OWNER' : 'EQUIPE')}
               </div>
             </div>
             <span className={`material-symbols-outlined text-white/20 transition-transform duration-300 ${showLogout ? 'rotate-180' : ''}`}>
