@@ -10,10 +10,11 @@ import { initializeApp } from "firebase/app";
 import admin from "firebase-admin";
 import fs from "fs";
 import QRCode from "qrcode";
-import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore, BufferJSON, AuthenticationCreds, initAuthCreds, SignalDataTypeMap } from "@whiskeysockets/baileys";
+import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from "@whiskeysockets/baileys";
 import pino from "pino";
 import nodemailer from "nodemailer";
 import { runVideoPipeline, initializeCronJob } from "./services/automation/orchestratorService.js";
+import { useFirestoreAuthState } from "./services/whatsapp/firestoreAuthState.js";
 
 dotenv.config();
 
@@ -541,7 +542,9 @@ async function startServer() {
     }
   });
 
-  // WhatsApp Sessions State
+  // ── WhatsApp in-memory session state ────────────────────────────────────────
+  // Cada entrada vive enquanto o processo estiver rodando.
+  // Ao reiniciar, restoreSessions() repopula a partir do Firestore.
   const sessions = new Map<string, {
     socket: any,
     qr: string | null,
@@ -549,70 +552,13 @@ async function startServer() {
     userInfo: any
   }>();
 
-  const useFirestoreAuthState = async (uid: string) => {
-    const db = admin.firestore();
-    const sessionRef = db.collection('whatsapp_sessions').doc(uid);
-    const keysRef = sessionRef.collection('keys');
-
-    const writeData = async (data: any, id: string) => {
-      const json = JSON.stringify(data, BufferJSON.replacer);
-      await keysRef.doc(id).set({ data: json });
-    };
-
-    const readData = async (id: string) => {
-      const doc = await keysRef.doc(id).get();
-      if (doc.exists) {
-        const data = doc.data();
-        return JSON.parse(data!.data, BufferJSON.reviver);
-      }
-      return null;
-    };
-
-    const removeData = async (id: string) => {
-      await keysRef.doc(id).delete();
-    };
-
-    const credsDoc = await sessionRef.get();
-    let creds: AuthenticationCreds;
-    if (credsDoc.exists && credsDoc.data()?.creds) {
-      creds = JSON.parse(credsDoc.data()!.creds, BufferJSON.reviver);
-    } else {
-      creds = initAuthCreds();
-    }
-
-    return {
-      state: {
-        creds,
-        keys: {
-          get: async (type: keyof SignalDataTypeMap, ids: string[]) => {
-            const data: { [id: string]: any } = {};
-            await Promise.all(ids.map(async (id) => {
-              const value = await readData(`${type}-${id}`);
-              if (value) data[id] = value;
-            }));
-            return data;
-          },
-          set: async (data: any) => {
-            const tasks: Promise<void>[] = [];
-            for (const type in data) {
-              for (const id in data[type]) {
-                const value = data[type][id];
-                const key = `${type}-${id}`;
-                if (value) {
-                  tasks.push(writeData(value, key));
-                } else {
-                  tasks.push(removeData(key));
-                }
-              }
-            }
-            await Promise.all(tasks);
-          }
-        }
-      },
-      saveCreds: async () => {
-        await sessionRef.set({ creds: JSON.stringify(creds, BufferJSON.replacer) }, { merge: true });
-      }
-    };
+  // Cache da versão do Baileys — evita N chamadas à CDN do WhatsApp no restart
+  let _waVersion: [number, number, number] | null = null;
+  const getWAVersion = async (): Promise<[number, number, number]> => {
+    if (_waVersion) return _waVersion;
+    const { version } = await fetchLatestBaileysVersion();
+    _waVersion = version;
+    return version;
   };
 
   const initializeWhatsApp = async (uid: string) => {
@@ -627,8 +573,8 @@ async function startServer() {
 
     try {
       const { state, saveCreds } = await useFirestoreAuthState(uid);
-      const { version, isLatest } = await fetchLatestBaileysVersion();
-      console.log(`[${uid}] using WA v${version.join('.')}, isLatest: ${isLatest}`);
+      const version = await getWAVersion();
+      console.log(`[${uid}] using WA v${version.join('.')}`);
 
       const socket = makeWASocket({
         version,
@@ -652,17 +598,31 @@ async function startServer() {
         }
 
         if (connection === 'close') {
-          const shouldReconnect = (lastDisconnect?.error as any)?.output?.statusCode !== DisconnectReason.loggedOut;
-          console.log(`[${uid}] WhatsApp Connection closed. Reconnecting:`, shouldReconnect);
+          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+          const shouldReconnect = !isLoggedOut;
+
+          console.log(`[${uid}] WhatsApp closed. loggedOut=${isLoggedOut}, reconnect=${shouldReconnect}`);
+
           session.status = 'disconnected';
           session.socket = null;
           session.qr = null;
-          // Emit disconnection to frontend immediately
+
+          // Marcar no Firestore que esta sessão foi deslogada pelo WhatsApp.
+          // restoreSessions() vai ignorar docs com loggedOut:true no próximo restart.
+          if (isLoggedOut) {
+            admin.firestore()
+              .collection('whatsapp_sessions').doc(uid)
+              .set({ loggedOut: true, loggedOutAt: new Date().toISOString() }, { merge: true })
+              .catch(err => logger.warn({ uid, err: err.message }, 'Falha ao marcar loggedOut no Firestore'));
+          }
+
           userSockets.get(uid)?.emit('whatsapp:status', {
             status: 'disconnected',
             qr: null,
             user: null
           });
+
           if (shouldReconnect) {
             setTimeout(() => initializeWhatsApp(uid), 5000);
           }
@@ -711,17 +671,41 @@ async function startServer() {
     }
   };
 
-  // Restore sessions for previously connected users from Firestore
+  // ── Restaura sessões ativas do Firestore ao iniciar o servidor ──────────────
+  //
+  // Reconecta automaticamente usuários que já haviam autenticado antes.
+  // Pula sessões marcadas como loggedOut (deslogadas pelo WhatsApp ou manualmente).
+  // Se as credenciais ainda forem válidas no lado do WA, reconecta sem QR Code.
   const restoreSessions = async () => {
     try {
-      const sessionsSnapshot = await admin.firestore().collection('whatsapp_sessions').get();
-      console.log(`[WhatsApp] Restoring ${sessionsSnapshot.size} sessions from Firestore...`);
-      sessionsSnapshot.forEach(doc => {
-        console.log(`[WhatsApp] Restoring session for user: ${doc.id}`);
+      const snapshot = await admin.firestore().collection('whatsapp_sessions').get();
+      let restored = 0, skipped = 0;
+
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+
+        // Pula sessões explicitamente deslogadas
+        if (data?.loggedOut === true) {
+          logger.info({ uid: doc.id, event: 'WA_RESTORE_SKIP_LOGOUT' }, 'Sessão loggedOut — ignorando');
+          skipped++;
+          continue;
+        }
+
+        // Pula docs sem credenciais (ex: sessão criada mas nunca autenticada)
+        if (!data?.creds) {
+          logger.info({ uid: doc.id, event: 'WA_RESTORE_SKIP_NO_CREDS' }, 'Sem credenciais — ignorando');
+          skipped++;
+          continue;
+        }
+
+        logger.info({ uid: doc.id, event: 'WA_RESTORE_START' }, 'Restaurando sessão WhatsApp');
         initializeWhatsApp(doc.id);
-      });
-    } catch (error) {
-      console.error("[WhatsApp] Error restoring sessions:", error);
+        restored++;
+      }
+
+      logger.info({ event: 'WA_RESTORE_DONE', restored, skipped }, `WhatsApp: ${restored} sessão(ões) restaurada(s), ${skipped} ignorada(s)`);
+    } catch (error: any) {
+      logger.error({ event: 'WA_RESTORE_ERROR', err: error.message }, 'Erro ao restaurar sessões WhatsApp');
     }
   };
 
@@ -808,6 +792,11 @@ async function startServer() {
     const uid = req.user.uid;
     let session = sessions.get(uid);
     if (!session || session.status === 'disconnected') {
+      // Limpa o flag loggedOut para permitir nova conexão e persistência
+      await admin.firestore()
+        .collection('whatsapp_sessions').doc(uid)
+        .set({ loggedOut: false }, { merge: true })
+        .catch(() => {});
       await initializeWhatsApp(uid);
       session = sessions.get(uid);
     }
@@ -850,6 +839,11 @@ async function startServer() {
       }
       sessions.delete(uid);
     }
+    // Marca no Firestore: não reconectar no próximo restart do servidor
+    await admin.firestore()
+      .collection('whatsapp_sessions').doc(uid)
+      .set({ loggedOut: true, loggedOutAt: new Date().toISOString() }, { merge: true })
+      .catch((err: any) => logger.warn({ uid, err: err.message }, 'Falha ao marcar loggedOut'));
     res.json({ success: true });
   });
 
