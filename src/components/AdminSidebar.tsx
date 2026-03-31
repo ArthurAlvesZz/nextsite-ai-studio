@@ -105,17 +105,19 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
           <span className="material-symbols-outlined text-lg">construction</span>
           <span className="font-headline font-bold text-xs uppercase tracking-widest">Ferramentas</span>
         </Link>
-        <Link 
-          to="/admin/settings" 
-          className={`flex items-center gap-3 px-4 py-3 rounded-xl mx-2 transition-all ${
-            activePage === 'settings' 
-              ? 'text-on-secondary bg-gradient-to-r from-secondary to-primary shadow-[0_0_20px_rgba(233,179,255,0.2)]' 
-              : 'text-white/50 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <span className="material-symbols-outlined text-lg">settings</span>
-          <span className="font-headline font-bold text-xs uppercase tracking-widest">Ajustes</span>
-        </Link>
+        {(adminProfile?.role === 'admin' || adminProfile?.isOwner) && (
+          <Link 
+            to="/admin/settings" 
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl mx-2 transition-all ${
+              activePage === 'settings' 
+                ? 'text-on-secondary bg-gradient-to-r from-secondary to-primary shadow-[0_0_20px_rgba(233,179,255,0.2)]' 
+                : 'text-white/50 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span className="material-symbols-outlined text-lg">settings</span>
+            <span className="font-headline font-bold text-xs uppercase tracking-widest">Ajustes</span>
+          </Link>
+        )}
 
         <div className="h-px bg-white/5 my-4 mx-6"></div>
 
@@ -154,7 +156,7 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
             }`}
           >
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-secondary/20 to-primary/20 border border-white/10 flex items-center justify-center overflow-hidden flex-shrink-0">
-              {adminProfile.avatarUrl ? (
+              {adminProfile?.avatarUrl ? (
                 <img src={adminProfile.avatarUrl} alt={adminProfile.name} className="h-full w-full object-cover" />
               ) : (
                 <span className="material-symbols-outlined text-secondary/60">person</span>
@@ -162,10 +164,10 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
             </div>
             <div className="flex-1 text-left min-w-0">
               <div className="text-[11px] font-headline font-bold text-white truncate uppercase tracking-tight">
-                {adminProfile.name}
+                {adminProfile?.name || 'Carregando...'}
               </div>
               <div className="text-[9px] text-white/40 font-medium uppercase tracking-widest">
-                {adminProfile.role === 'admin' ? 'Administrador' : 'Editor'}
+                {adminProfile?.isOwner ? 'Proprietário' : (adminProfile?.role === 'admin' ? 'Administrador' : 'Equipe')}
               </div>
             </div>
             <span className={`material-symbols-outlined text-white/20 transition-transform duration-300 ${showLogout ? 'rotate-180' : ''}`}>

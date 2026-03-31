@@ -2,141 +2,235 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
+
+    // ================================================================
+    // HELPER FUNCTIONS — Role Hierarchy
+    //
+    //  owner  →  isOwnerRole()       Controla tudo: settings, users,
+    //                                employees, dorks, goals, billing
+    //
+    //  admin  →  isAdmin()           Inclui owner + role:'admin'.
+    //                                Acesso operacional pleno.
+    //
+    //  editor →  isEditor()          Vendedores: acesso restrito aos
+    //                                próprios dados, leads e clientes.
+    //
+    // ================================================================
+
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    function isMasterOwner() {
+
+    // Owner: identidade verificada via e-mail hardcoded OU flag isOwner
+    // no documento employees. É a identidade mais privilegiada do sistema.
+    function isOwnerRole() {
       return isAuthenticated() && (
-        (request.auth.token.email == "arthurfgalves@gmail.com") ||
-        (request.auth.token.email == "15599873676@nextcreatives.co") ||
-        (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) && get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.isOwner == true)
+        request.auth.token.email == "arthurfgalves@gmail.com" ||
+        request.auth.token.email == "15599873676@nextcreatives.co" ||
+        (
+          exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.isOwner == true
+        )
       );
     }
 
+    // Alias mantido para compatibilidade com regras existentes
+    function isMasterOwner() {
+      return isOwnerRole();
+    }
+
     function isAdmin() {
-      return isMasterOwner() || (
-        isAuthenticated() && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+      return isOwnerRole() || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
       );
     }
 
     function isEditor() {
-      return isAuthenticated() && (
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor'
-      );
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'editor';
     }
 
     function isAdminOrEditor() {
       return isAdmin() || isEditor();
     }
 
+    // Verifica se o UID do token corresponde ao userId do documento
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // ===============================================================
-    // Rules
-    // ===============================================================
-    
+    // ================================================================
+    // SETTINGS — Configurações da agência e dados da landing page
+    //
+    // Leitura: 'global' é pública (landing page). Demais docs: autenticado.
+    // ESCRITA: somente owner. Nenhum editor ou admin altera configurações.
+    // ================================================================
     match /settings/{settingId} {
-      // Only the 'global' document is public (powers the landing page).
-      // Any other settings document requires authentication.
-      // This is the ONLY intentional unauthenticated read in the entire schema.
-      allow read: if settingId == 'global' || isAuthenticated();
-      // Only admins can write settings
-      allow write: if isAdmin() && (settingId == 'global' || settingId == request.auth.uid);
+      allow read: if settingId == 'global' || isAdminOrEditor();
+      allow write: if isOwnerRole();
     }
-    
+
+    // ================================================================
+    // USERS — Perfis de autenticação (admin, editor)
+    //
+    // Leitura: cada usuário lê o próprio doc; owner lê todos.
+    // ESCRITA: exclusivo do owner. Impede auto-promoção de role.
+    // ================================================================
     match /users/{userId} {
-      // Users can read their own profile, admins can read all
-      allow read: if isOwner(userId) || isAdmin();
-      
-      // Prevent deleting the owner document
-      allow delete: if isAdmin() && resource.data.role != 'admin' && resource.data.name != 'Arthur Fagundes #Owner';
-      
-      // Prevent demoting the owner
-      allow update: if isAdmin() && (
-        resource.data.role != 'admin' || 
-        request.resource.data.role == 'admin'
+      allow get:  if isOwner(userId) || isAdmin();
+      allow list: if isOwnerRole();
+
+      allow create: if isOwnerRole();
+
+      // Owner pode atualizar qualquer campo, exceto remover a própria role de owner
+      allow update: if isOwnerRole() && (
+        resource.data.role != 'owner' ||
+        request.resource.data.role == 'owner'
       );
-      
-      allow create: if isAdmin();
+
+      // Owner pode deletar, mas não o próprio documento
+      allow delete: if isOwnerRole() && request.auth.uid != userId;
     }
-    
+
+    // ================================================================
+    // EMPLOYEES — Membros da equipe (lista de funcionários)
+    //
+    // Leitura ampla (list): somente owner e admin.
+    // Leitura própria (get): qualquer autenticado pode ler o próprio doc.
+    // ESCRITA (create/delete): exclusivo do owner.
+    // UPDATE: owner pode tudo; editor pode atualizar APENAS o próprio doc
+    //         em campos não-sensíveis (avatar, telefone).
+    // ================================================================
+    match /employees/{employeeId} {
+      allow get:  if isAdmin() || (isAuthenticated() && request.auth.uid == employeeId);
+      allow list: if isAdmin();
+
+      // Somente owner cria e deleta membros
+      allow create: if isOwnerRole();
+      allow delete: if isOwnerRole() && resource.data.isOwner != true;
+
+      // Owner edita tudo. Editor edita apenas o próprio doc e apenas
+      // campos permitidos (não pode alterar role, isOwner, userId, createdBy).
+      allow update: if isOwnerRole() ||
+        (
+          isAdminOrEditor() &&
+          request.auth.uid == employeeId &&
+          !request.resource.data.diff(resource.data)
+            .affectedKeys()
+            .hasAny(['isOwner', 'role', 'userId', 'createdBy', 'login'])
+        );
+    }
+
+    // ================================================================
+    // DORKS — Termos de busca para captura de leads (sensível)
+    //
+    // Acesso total exclusivo do owner. Editores não têm visibilidade.
+    // ================================================================
     match /dorks/{dorkId} {
-      // Only admins can read and write dorks
-      allow read, write: if isAdmin();
+      allow read, write: if isOwnerRole();
     }
 
+    // ================================================================
+    // GOALS — Metas mensais da agência e individuais por membro
+    //
+    // Leitura: admin e editor (necessário para o dashboard).
+    // ESCRITA: somente owner define metas.
+    // ================================================================
+    match /goals/{goalId} {
+      allow read: if isAdminOrEditor();
+      allow write: if isOwnerRole();
+    }
+
+    // ================================================================
+    // CLIENTS — Clientes da agência
+    //
+    // Admin/editor: acesso pleno (operacional).
+    // Cliente externo: pode ler apenas o próprio documento.
+    // ================================================================
     match /clients/{clientId} {
-      // Admins and editors can read and write clients
-      // Clients can read their own document
-      allow read: if isAdminOrEditor() || (isAuthenticated() && (resource.data.accessId == request.auth.token.email.split('@')[0] || clientId == request.auth.uid));
+      allow read: if isAdminOrEditor() ||
+        (isAuthenticated() && (
+          resource.data.accessId == request.auth.token.email.split('@')[0] ||
+          clientId == request.auth.uid
+        ));
       allow write: if isAdminOrEditor();
     }
 
+    // ================================================================
+    // SALES — Registros de vendas
+    //
+    // Leitura: admin/editor vê tudo; cliente lê própria venda.
+    // ESCRITA: admin/editor.
+    // ================================================================
     match /sales/{saleId} {
-      // Admins and editors can read and write sales
-      // Clients can read their own sales
-      allow read: if isAdminOrEditor() || (isAuthenticated() && resource.data.clientId == request.auth.uid);
+      allow read: if isAdminOrEditor() ||
+        (isAuthenticated() && resource.data.clientId == request.auth.uid);
       allow write: if isAdminOrEditor();
     }
 
+    // ================================================================
+    // DEMANDS — Demandas de produção de vídeo
+    // ================================================================
     match /demands/{demandId} {
-      // Admins and editors can read and write demands
-      // Clients can read their own demands
-      allow read: if isAdminOrEditor() || (isAuthenticated() && resource.data.clientId == request.auth.uid);
+      allow read: if isAdminOrEditor() ||
+        (isAuthenticated() && resource.data.clientId == request.auth.uid);
       allow write: if isAdminOrEditor();
     }
 
+    // ================================================================
+    // NOTIFICATIONS — Notificações de clientes
+    // ================================================================
     match /notifications/{notificationId} {
-      // Clients can read and update their own notifications
-      // Admins can read and write all
-      allow read: if isAdminOrEditor() || (isAuthenticated() && resource.data.clientId == request.auth.uid);
-      allow update: if isAuthenticated() && resource.data.clientId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow read: if isAdminOrEditor() ||
+        (isAuthenticated() && resource.data.clientId == request.auth.uid);
+      // Cliente pode marcar a própria notificação como lida (apenas campo 'read')
+      allow update: if isAuthenticated() &&
+        resource.data.clientId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
       allow create, delete: if isAdminOrEditor();
     }
 
-    match /employees/{employeeId} {
-      // Anyone can read (to show in lists), but only admins can write
-      allow read: if isAuthenticated();
-      
-      // Prevent deleting the owner document
-      allow delete: if isAdmin() && resource.data.isOwner != true;
-      
-      // Prevent modifying the isOwner flag or role of the owner
-      allow update: if isAdmin() && (
-        resource.data.isOwner != true || 
-        (request.resource.data.isOwner == true && request.resource.data.role == 'Admin')
-      );
-      
-      allow create: if isAdmin();
+    // ================================================================
+    // LEADS COLHIDOS — Pipeline de prospecção
+    //
+    // Owner: vê e gerencia todos os leads.
+    // Admin: vê e gerencia todos os leads (acesso operacional pleno).
+    // Editor/Vendedor: vê e trabalha APENAS os leads atribuídos a ele
+    //                  (ownerId == uid). Não lista leads de outros.
+    // ================================================================
+    match /leadsColhidos/{leadId} {
+      allow get: if isAdmin() ||
+        (isEditor() && resource.data.ownerId == request.auth.uid);
+
+      allow list: if isAdmin() ||
+        (isEditor() && resource.data.ownerId == request.auth.uid);
+
+      allow create: if isAdminOrEditor() &&
+        (!('ownerId' in request.resource.data) ||
+          request.resource.data.ownerId == request.auth.uid);
+
+      allow update, delete: if isAdmin() ||
+        (isEditor() && resource.data.ownerId == request.auth.uid);
     }
 
-    match /goals/{goalId} {
-      // Admins and editors can read goals, only admins can update
-      allow read: if isAdminOrEditor();
-      allow write: if isAdmin() && (goalId == 'global' || goalId == request.auth.uid);
-    }
-    
+    // ================================================================
+    // PRESENCE — Presença online em tempo real
+    // ================================================================
     match /presence/{sessionId} {
-      // Only authenticated users can read/write presence (prevents unauthenticated flood)
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == resource.data.uid;
+      allow read:   if isAuthenticated();
       allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() &&
+        request.auth.uid == resource.data.uid;
     }
 
+    // ================================================================
+    // WHATSAPP SESSIONS — Sessões do bot WhatsApp (isolamento por UID)
+    // ================================================================
     match /whatsapp_sessions/{userId} {
-      // Each user can only access their own WhatsApp session (uid isolation)
       allow read, write: if isAuthenticated() && request.auth.uid == userId;
-      // Admins can read sessions for support/debugging but cannot write
       allow read: if isAdmin();
 
       match /keys/{keyId} {
@@ -144,47 +238,38 @@ service cloud.firestore {
       }
     }
 
+    // ================================================================
+    // VIDEO PIPELINE RUNS — Logs de execução do pipeline de vídeo
+    // Apenas owner e admin (operacional). Editores não têm acesso.
+    // ================================================================
     match /videoPipelineRuns/{runId} {
-      // Only admins can read/write pipeline run logs
       allow read, write: if isAdmin();
     }
 
+    // ================================================================
+    // SCRAPER METADATA — Status e progresso do scraper de leads
+    // Leitura: admin (para o painel). Escrita: somente servidor (Admin SDK).
+    // ================================================================
+    match /scraper_metadata/{docId} {
+      allow read:  if isAdmin();
+      allow write: if false;
+    }
+
+    // ================================================================
+    // RATE LIMITS — Controle de quota por usuário
+    // Escrito exclusivamente pelo servidor via Admin SDK.
+    // Bloqueado do lado do cliente para impedir manipulação.
+    // ================================================================
     match /rateLimits/{userId} {
-      // Written exclusively by the server via Firebase Admin SDK (bypasses these rules).
-      // Block all client-side reads and writes — users must never see or manipulate quota docs.
       allow read, write: if false;
     }
 
-    match /leadsColhidos/{leadId} {
-      // Role-based: admins and editors can manage leads
-      // Additionally enforces ownerId isolation: a lead belongs to who created it
-      allow read: if isAdminOrEditor() && (
-        isMasterOwner() ||
-        !('ownerId' in resource.data) ||
-        resource.data.ownerId == request.auth.uid
-      );
-      allow create: if isAdminOrEditor() && (
-        !('ownerId' in request.resource.data) ||
-        request.resource.data.ownerId == request.auth.uid
-      );
-      allow update, delete: if isAdminOrEditor() && (
-        isMasterOwner() ||
-        !('ownerId' in resource.data) ||
-        resource.data.ownerId == request.auth.uid
-      );
-    }
-
-    match /rateLimits/{userId} {
-      // Written exclusively by the server via Firebase Admin SDK (bypasses these rules).
-      // Block all client-side reads and writes.
-      allow read, write: if false;
-    }
-
+    // ================================================================
+    // AI SYSTEM LOGS — Logs de erro do frontend e do servidor
+    // Escrita permitida para capturar erros de sessões não autenticadas.
+    // Leitura PERMANENTEMENTE bloqueada do cliente.
+    // ================================================================
     match /ai_system_logs/{logId} {
-      // Write-only: captures errors from unauthenticated sessions too.
-      // Server is the real writer (Admin SDK bypasses rules), but this allows
-      // a future direct-client fallback without rule changes.
-      // Reading is PERMANENTLY prohibited from the client — for AI/admin analysis only.
       allow write: if true;
       allow read:  if false;
     }

@@ -8,29 +8,26 @@ export interface AdminProfile {
   name: string;
   phone: string;
   avatarUrl: string;
-  role?: 'admin' | 'editor';
+  role?: 'admin' | 'editor' | 'vendedor' | string;
   password?: string;
   email?: string;
   googleLinked?: boolean;
   googleEmail?: string;
   googleUid?: string;
   userId?: string;
+  isOwner?: boolean;
 }
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
-  const [adminProfile, setAdminProfile] = useState<AdminProfile>({
-    name: 'Arthur Fagundes #Owner',
-    phone: '15599873676',
-    avatarUrl: '',
-    role: 'admin'
-  });
+  const [adminProfile, setAdminProfile] = useState<AdminProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (!currentUser) {
+        setAdminProfile(null);
         setLoading(false);
       }
     });
@@ -71,7 +68,8 @@ export function useAuth() {
           avatarUrl: user.photoURL || '',
           role: isMaster ? 'admin' : 'editor',
           email: user.email || '',
-          userId: user.uid
+          userId: user.uid,
+          isOwner: isMaster
         };
         setAdminProfile(defaultProfile);
 
@@ -113,7 +111,8 @@ export function useAuth() {
     if (!user) return;
     const userDocRef = doc(db, 'users', user.uid);
     try {
-      await setDoc(userDocRef, { ...adminProfile, ...updates }, { merge: true });
+      const currentProfile = adminProfile || {} as AdminProfile;
+      await setDoc(userDocRef, { ...currentProfile, ...updates }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }

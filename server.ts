@@ -288,6 +288,62 @@ const requireAdmin = async (req: any, res: any, next: any) => {
   }
 };
 
+// ─── requireOwner — Middleware RBAC: apenas o dono da agência ────────────────
+//
+// Verifica, via Admin SDK (sem depender de token client-side para o papel),
+// se o usuário logado é o owner. Critérios (qualquer um satisfaz):
+//   1. E-mail bate com os e-mails hardcoded do master
+//   2. employees/{uid}.isOwner === true  (owner cadastrado no Firestore)
+//
+// Usado em rotas que afetam: criação de usuários, configurações vitais,
+// faturamento e qualquer operação que um editor JAMAIS deve executar.
+// ─────────────────────────────────────────────────────────────────────────────
+const MASTER_EMAILS = new Set([
+  'arthurfgalves@gmail.com',
+  '15599873676@nextcreatives.co',
+]);
+
+const requireOwner = async (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: token ausente.' });
+  }
+  const token = authHeader.split('Bearer ')[1];
+
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    const uid = decodedToken.uid;
+
+    // Critério 1: e-mail master hardcoded
+    if (MASTER_EMAILS.has(decodedToken.email ?? '')) {
+      req.user = decodedToken;
+      return next();
+    }
+
+    // Critério 2: employees/{uid}.isOwner === true (via Admin SDK — bypass de regras)
+    const employeeSnap = await admin.firestore()
+      .collection('employees')
+      .doc(uid)
+      .get();
+
+    if (employeeSnap.exists && employeeSnap.data()?.isOwner === true) {
+      req.user = decodedToken;
+      return next();
+    }
+
+    logger.warn(
+      { uid, email: decodedToken.email, url: req.url, event: 'OWNER_FORBIDDEN' },
+      'Usuário autenticado não tem permissão de owner'
+    );
+    return res.status(403).json({
+      error: 'Forbidden: Esta operação requer permissão de proprietário.',
+    });
+  } catch (error) {
+    logger.warn({ url: req.url, event: 'OWNER_INVALID_TOKEN', error }, 'Token inválido no requireOwner');
+    return res.status(401).json({ error: 'Unauthorized: token inválido.' });
+  }
+};
+
 // ─── SMTP Transporter (Hostinger) ─────────────────────────────────────────────
 const smtpTransporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.hostinger.com",
@@ -1277,7 +1333,7 @@ async function startServer() {
   // Transação segura: se o Firestore falhar, o usuário do Auth é deletado
   // imediatamente, prevenindo contas "fantasmas".
   // ════════════════════════════════════════════════════════════════════════════
-  app.post("/api/admin/users/create", requireAdmin, async (req: any, res: any) => {
+  app.post("/api/admin/users/create", requireOwner, async (req: any, res: any) => {
     const { name, login, password, role } = req.body ?? {};
 
     if (!name || !login || !password) {
@@ -1295,7 +1351,7 @@ async function startServer() {
       return res.status(400).json({ error: "Login inválido. Use apenas letras, números, ponto, hífen ou underscore." });
     }
 
-    const email = `${sanitizedLogin}@nextcreatives.internal`;
+    const email = `${sanitizedLogin}@nextcreatives.co`;
     const memberRole = (role === 'editor' || role === 'admin') ? role : 'editor';
 
     let createdUid: string | null = null;
