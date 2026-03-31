@@ -47,6 +47,7 @@ import {
   MoreHorizontal,
   Bookmark
 } from 'lucide-react';
+import { useLenis } from '@studio-freight/react-lenis';
 
 import logo from './assets/logo.png';
 
@@ -80,7 +81,29 @@ const cases = [
 
 function MainApp() {
   const { settings } = useAgencySettings();
-  const [isReady, setIsReady] = useState(true); // Set to true by default since we removed the preloader
+  const [isReady, setIsReady] = useState(true);
+  
+  const lenis = useLenis();
+
+  useEffect(() => {
+    if (!lenis) return;
+
+    // Synchronize Lenis with GSAP ScrollTrigger
+    lenis.on('scroll', ScrollTrigger.update);
+
+    // Synchronize GSAP ticker with Lenis
+    gsap.ticker.add((time) => {
+      lenis.raf(time * 1000);
+    });
+
+    // Reset GSAP lag smoothing to maintain sync
+    gsap.ticker.lagSmoothing(0);
+
+    return () => {
+      lenis.off('scroll', ScrollTrigger.update);
+      gsap.ticker.remove((time) => lenis.raf(time * 1000));
+    };
+  }, [lenis]);
 
   useEffect(() => {
     // Cinematic Matrix Background Logic
