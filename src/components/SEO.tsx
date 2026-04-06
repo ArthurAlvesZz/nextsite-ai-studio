@@ -19,6 +19,10 @@ export default function SEO({ title, description, image, url }: SEOProps) {
       <title>{siteTitle}</title>
       <meta name="description" content={description || defaultDesc} />
 
+      {/* Favicon — garante presença em 100% das rotas via Helmet */}
+      <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+      <link rel="shortcut icon" href="/favicon.png" />
+
       <meta property="og:title" content={siteTitle} />
       <meta property="og:description" content={description || defaultDesc} />
       <meta property="og:image" content={image || defaultImage} />

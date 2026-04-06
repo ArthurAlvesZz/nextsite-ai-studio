@@ -57,21 +57,21 @@ gsap.registerPlugin(ScrollTrigger, TextPlugin);
 
 const cases = [
   {
-    videoSrc: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    videoSrc: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.webm",
     tituloDaCampanha: "SaaS Elite",
     metricaPrincipal: "+40% ROI",
     descricao: "Vídeos cinematográficos aplicados em funis de alta performance para o mercado B2B.",
     cliente: "@saas_elite"
   },
   {
-    videoSrc: "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+    videoSrc: "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.webm",
     tituloDaCampanha: "Moda & E-commerce",
     metricaPrincipal: "2.5x ROAS",
     descricao: "Storytelling visual que transforma a percepção da marca e gera desejo imediato.",
     cliente: "@fashion_luxury"
   },
   {
-    videoSrc: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+    videoSrc: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.webm",
     tituloDaCampanha: "Infoprodutos",
     metricaPrincipal: "12M Views",
     descricao: "Conteúdo viral estratégico para lançamentos de sete dígitos.",
@@ -309,7 +309,7 @@ function ImmersiveBackground() {
         }}
       >
         <motion.img 
-          src="/bg-shape.png" 
+          src="/bg-shape.webp" 
           alt="3D Background Shape" 
           className="w-[120vw] h-[120vw] max-w-[1200px] max-h-[1200px] object-contain drop-shadow-[0_0_50px_rgba(153,0,255,0.3)] transform-gpu will-change-transform"
           loading="lazy"

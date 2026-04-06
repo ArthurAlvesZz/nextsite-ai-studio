@@ -1232,6 +1232,19 @@ async function startServer() {
 
       let processedCount = 0;
       const totalUrls = urls.length;
+      const runStartedAt = new Date().toISOString();
+
+      // Escreve estado inicial para o painel NextZap ver "0 de N leads processados"
+      admin.firestore().collection('scraper_metadata').doc('stats').set({
+        shopify: {
+          processados: 0,
+          total: totalUrls,
+          totalLeads: 0,
+          queueProgress: 0,
+          lastRun: runStartedAt,
+          currentStatus: 'running',
+        }
+      }, { merge: true }).catch(() => {});
 
       pythonProcess.stdout.on('data', (data: any) => {
         const lines = data.toString().split('\n').filter(Boolean);
@@ -1240,12 +1253,15 @@ async function startServer() {
           // Python scraper logs "  → store_name | ..." for each completed store
           if (line.includes(' → ')) {
             processedCount++;
-            if (processedCount % 50 === 0) {
+            // Atualiza Firestore a cada 5 lojas para mostrar "X de Y" em tempo real
+            if (processedCount % 5 === 0 || processedCount === totalUrls) {
               admin.firestore().collection('scraper_metadata').doc('stats').set({
                 shopify: {
+                  processados: processedCount,
+                  total: totalUrls,
                   totalLeads: processedCount,
                   queueProgress: Math.round((processedCount / totalUrls) * 100),
-                  lastRun: new Date().toISOString(),
+                  lastRun: runStartedAt,
                   currentStatus: 'running',
                 }
               }, { merge: true }).catch(() => {});
@@ -1259,12 +1275,14 @@ async function startServer() {
       });
 
       pythonProcess.on('close', (code: any) => {
-        // Write final stats to Firestore regardless of exit code
+        // Escreve estado final — progresso completo visível no NextZap
         admin.firestore().collection('scraper_metadata').doc('stats').set({
           shopify: {
+            processados: processedCount,
+            total: totalUrls,
             totalLeads: processedCount,
             queueProgress: 100,
-            lastRun: new Date().toISOString(),
+            lastRun: runStartedAt,
             currentStatus: 'stopped',
           }
         }, { merge: true }).catch(() => {});

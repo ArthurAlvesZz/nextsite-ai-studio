@@ -258,6 +258,37 @@ service cloud.firestore {
     }
 
     // ================================================================
+    // CRM LEADS — Base de dados de leads do CRM
+    //
+    // Acesso restrito a owner e admin (Custom Claim role == 'owner' | 'admin').
+    // Vendedores/editores não têm visibilidade. Rotas: /admin/settings,
+    // /admin/tools (Sprints 11, 14, 15).
+    // ================================================================
+    match /crm_leads/{leadId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ================================================================
+    // APP SETTINGS — Configurações avançadas da aplicação
+    //
+    // Dados sensíveis de configuração do sistema.
+    // Apenas owner e admin podem ler e escrever.
+    // ================================================================
+    match /app_settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ================================================================
+    // API KEYS — Chaves de API e tokens de integrações sensíveis
+    //
+    // Acesso restrito a owner e admin.
+    // Vendedores não têm visibilidade sobre credenciais de terceiros.
+    // ================================================================
+    match /api_keys/{keyId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ================================================================
     // RATE LIMITS — Controle de quota por usuário
     // Escrito exclusivamente pelo servidor via Admin SDK.
     // Bloqueado do lado do cliente para impedir manipulação.

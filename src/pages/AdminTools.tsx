@@ -3,15 +3,14 @@ import SEO from '../components/SEO';
 import { Link, useNavigate } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import { motion } from 'motion/react';
-import { useAuth } from '../hooks/useAuth';
+import { useRequireAuth } from '../hooks/useRequireAuth';
 
 export default function AdminTools() {
-  const { adminProfile, loading: authLoading } = useAuth();
+  const { adminProfile, loading: authLoading } = useRequireAuth('owner');
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // AdminTools is now accessible to all authorized roles (Editor, Vendedor, Owner)
-  // as it contains company manuals and shared tools.
+  // AdminTools restrito para Owners
 
   const manuals = [
     {

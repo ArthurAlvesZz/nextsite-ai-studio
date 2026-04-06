@@ -3,7 +3,7 @@ import SEO from '../components/SEO';
 import { Link, useNavigate } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar';
 import GlobalSearch from '../components/GlobalSearch';
-import { useAuth } from '../hooks/useAuth';
+import { useRequireAuth } from '../hooks/useRequireAuth';
 import { useEmployees, TeamMember } from '../hooks/useEmployees';
 import { useAgencySettings, PortfolioCase, WorkflowStep } from '../hooks/useAgencySettings';
 import { useGoalSettings } from '../hooks/useGoalSettings';
@@ -15,18 +15,8 @@ export default function AdminSettings() {
   const { teamMembers, addMember, updateMember, deleteMember } = useEmployees();
   const { settings, updateSettings } = useAgencySettings();
   const { goalSettings, updateGoalSettings } = useGoalSettings();
-  const { adminProfile, loading: authLoading } = useAuth();
+  const { adminProfile, loading: authLoading } = useRequireAuth('owner');
   const navigate = useNavigate();
-
-  // Route Protection
-  useEffect(() => {
-    if (!authLoading && adminProfile) {
-      const role = adminProfile.role?.toLowerCase();
-      if (role !== 'owner' && role !== 'admin' && !adminProfile.isOwner) {
-        navigate('/admin/dashboard', { replace: true });
-      }
-    }
-  }, [adminProfile, authLoading, navigate]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
