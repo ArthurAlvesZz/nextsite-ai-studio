@@ -1557,7 +1557,7 @@ export default function AdminLeadEngine() {
                     <textarea 
                       value={jobUrlsInput}
                       onChange={(e) => setJobUrlsInput(e.target.value)}
-                      placeholder="https://loja1.com&#10;https://loja2.com"
+                      placeholder={"https://loja1.com\nhttps://loja2.com"}
                       className="w-full h-48 bg-white/[0.02] border border-white/10 rounded-xl p-4 text-sm text-white font-mono leading-relaxed focus:border-secondary/50 focus:outline-none focus:ring-1 focus:ring-secondary/50 resize-none shadow-inner"
                     />
                   </div>
@@ -1621,7 +1621,6 @@ export default function AdminLeadEngine() {
             </div>
           )}
         </AnimatePresence>
-        </div>
       </main>
     </div>
   );

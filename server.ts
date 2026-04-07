@@ -1,355 +1,66 @@
-import express from "express";
-import { createServer as createHttpServer } from "http";
-import { Server as SocketIOServer } from "socket.io";
-import rateLimit from "express-rate-limit";
-import { createServer as createViteServer } from "vite";
-import path from "path";
-import { fileURLToPath } from "url";
-import dotenv from "dotenv";
-import { initializeApp } from "firebase/app";
-import admin from "firebase-admin";
-import fs from "fs";
-import QRCode from "qrcode";
-import { makeWASocket, DisconnectReason, fetchLatestBaileysVersion, makeInMemoryStore } from "@whiskeysockets/baileys";
-import pino from "pino";
-import nodemailer from "nodemailer";
-import { runVideoPipeline, initializeCronJob } from "./services/automation/orchestratorService.js";
-import { useFirestoreAuthState } from "./services/whatsapp/firestoreAuthState.js";
-import { spawn } from "child_process";
+/**
+ * server.ts — Entry point do servidor NextCreatives
+ *
+ * Arquitetura pós-Fase-1:
+ *  - Configuração do Express, Socket.IO e middlewares globais → src/backend/app.ts
+ *  - Firebase Admin SDK                                        → src/backend/config/firebase.ts
+ *  - Baileys store + versão WA                                → src/backend/config/whatsapp.config.ts
+ *  - requireAdmin, requireOwner, rate limiters UID            → src/backend/middlewares/auth.ts
+ *  - Logger Pino centralizado                                 → src/backend/utils/logger.ts
+ *  - Schemas Zod                                              → src/backend/types/validators.ts
+ *
+ * Este arquivo: handlers de rota + gerenciamento de sessão WhatsApp.
+ * Fase 2 extrairá cada domínio para src/backend/routes/*.ts e services/*.ts.
+ */
 
+import dotenv from 'dotenv';
 dotenv.config();
 
+// ── Módulos backend (nova arquitetura) ────────────────────────────────────────
+import {
+  app, httpServer, userSockets,
+  waSendLimiter, transcribeLimiter, leadSearchLimiter, logLimiter,
+} from './src/backend/app.js';
+import { admin, db } from './src/backend/config/firebase.js';
+import { store, getWAVersion } from './src/backend/config/whatsapp.config.js';
+import { requireAdmin, requireOwner, createUserRateLimiter } from './src/backend/middlewares/auth.js';
+import { logger } from './src/backend/utils/logger.js';
+import {
+  SystemLogSchema,
+  ForgotPasswordSchema,
+  CreateUserSchema,
+  LeadSearchSchema,
+  GenerateScriptSchema,
+  WhatsappSendSchema,
+  WhatsappPairSchema,
+  WhatsappTranscribeSchema,
+  ShopifyScraperSchema,
+} from './src/backend/types/validators.js';
+
+// ── Node / npm imports ────────────────────────────────────────────────────────
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import QRCode from 'qrcode';
+import { makeWASocket, DisconnectReason } from '@whiskeysockets/baileys';
+import pino from 'pino';
+import nodemailer from 'nodemailer';
+import { spawn } from 'child_process';
+import { createServer as createViteServer } from 'vite';
+import { runVideoPipeline, initializeCronJob } from './services/automation/orchestratorService.js';
+import { useFirestoreAuthState } from './services/whatsapp/firestoreAuthState.js';
+
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
+const PORT       = Number(process.env.PORT) || 3000;
 
-// ── Named application logger ──────────────────────────────────────────────────
-// Use LOG_LEVEL=debug for verbose output. Default: info.
-const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  base: { service: 'nextcreatives-server' },
-});
-
-// ── Per-user rate limiting (Firestore-backed, in-memory cached) ───────────────
-//
-// Architecture:
-//  1. IP-based express-rate-limit  → first gate, no DB needed, blocks bots fast
-//  2. requireAdmin middleware      → verifies Firebase JWT, sets req.user.uid
-//  3. createUserRateLimiter(action)→ second gate, per-uid sliding window (1 hour)
-//  4. checkCircuitBreaker(action)  → third gate, global counter; opens on abuse
-//
-// Firestore doc: rateLimits/{uid}  → { [action]: { count, windowStart } }
-// In-memory cache (30s TTL) prevents a Firestore read on every single request.
-
-const USER_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour sliding window
-const USER_RATE_CACHE_TTL_MS = 30_000;       // re-read Firestore every 30s at most
-
-// Per-user limits (requests per hour, per uid)
-const USER_LIMITS: Record<string, number> = {
-  transcribe:     30,   // 30 Whisper/Groq calls per user/hour
-  video_pipeline: 5,    // 5 HeyGen renders per user/hour
-  lead_search:    20,   // 20 Google Custom Search calls per user/hour
-  whatsapp_send:  120,  // 120 WhatsApp sends per user/hour
-};
-
-// Global circuit-breaker thresholds (all users combined, per hour)
-const CIRCUIT_THRESHOLDS: Record<string, number> = {
-  transcribe:     200,  // if >200 transcriptions/hr across all users → 503
-  video_pipeline: 30,   // if >30 video renders/hr globally → 503
-  lead_search:    150,  // if >150 lead searches/hr globally → 503
-  whatsapp_send:  1000, // if >1000 WA sends/hr globally → 503
-};
-
-interface UserRateCacheEntry {
-  count: number;
-  windowStart: number; // epoch ms
-  lastCached: number;  // epoch ms — cache freshness timestamp
-}
-
-interface CircuitEntry {
-  count: number;
-  windowStart: number;
-  isOpen: boolean;
-}
-
-// In-memory stores (reset on server restart — intentional for circuit breaker)
-const userRateCache  = new Map<string, UserRateCacheEntry>();
-const circuitState   = new Map<string, CircuitEntry>();
-
-/**
- * checkCircuitBreaker — increments the global counter for an action.
- * Returns true (circuit open) if the threshold is exceeded → caller sends 503.
- */
-function checkCircuitBreaker(action: string): boolean {
-  const threshold = CIRCUIT_THRESHOLDS[action];
-  if (!threshold) return false;
-
-  const now = Date.now();
-  let entry = circuitState.get(action);
-
-  // Reset window if expired
-  if (!entry || now - entry.windowStart > USER_RATE_WINDOW_MS) {
-    entry = { count: 0, windowStart: now, isOpen: false };
-    circuitState.set(action, entry);
-  }
-
-  // Circuit already open — don't reset until window expires
-  if (entry.isOpen) return true;
-
-  entry.count++;
-
-  if (entry.count > threshold) {
-    entry.isOpen = true;
-    logger.warn(
-      { action, globalCount: entry.count, threshold, event: 'CIRCUIT_BREAKER_OPEN' },
-      `Circuit breaker opened for action "${action}" (${entry.count}/${threshold} req/hr globally)`
-    );
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * createUserRateLimiter — middleware factory.
- * Must be placed AFTER requireAdmin (needs req.user.uid).
- *
- * Flow:
- *  1. Circuit breaker check (in-memory, fast)
- *  2. Memory cache check (stale after 30s → reads Firestore)
- *  3. Limit check → 429 if exceeded
- *  4. Increment counter → async write-through to Firestore (non-blocking)
- */
-function createUserRateLimiter(action: string) {
-  const maxRequests = USER_LIMITS[action] ?? 20;
-
-  return async (req: any, res: any, next: any) => {
-    const uid: string | undefined = req.user?.uid;
-    if (!uid) return next(); // requireAdmin already blocked unauthenticated requests
-
-    // ── Gate 1: Global circuit breaker ──────────────────────────────────────
-    if (checkCircuitBreaker(action)) {
-      logger.warn(
-        { uid, action, event: 'CIRCUIT_BREAKER_REJECTED' },
-        `Request rejected — circuit breaker open for "${action}"`
-      );
-      return res.status(503).json({
-        error: 'Serviço temporariamente suspenso por manutenção de segurança de custos. Tente novamente em alguns minutos.',
-        retryAfter: 60
-      });
-    }
-
-    // ── Gate 2: Per-user sliding window ─────────────────────────────────────
-    const cacheKey = `${uid}:${action}`;
-    const now = Date.now();
-    let entry = userRateCache.get(cacheKey);
-    const cacheStale = !entry || (now - entry.lastCached) > USER_RATE_CACHE_TTL_MS;
-
-    if (cacheStale) {
-      try {
-        const docSnap = await admin.firestore().collection('rateLimits').doc(uid).get();
-        const stored = docSnap.data()?.[action] as { count: number; windowStart: number } | undefined;
-
-        if (stored && (now - stored.windowStart) < USER_RATE_WINDOW_MS) {
-          entry = { count: stored.count, windowStart: stored.windowStart, lastCached: now };
-        } else {
-          // Window expired in Firestore or no record — start fresh
-          entry = { count: 0, windowStart: now, lastCached: now };
-        }
-        userRateCache.set(cacheKey, entry);
-      } catch (err) {
-        // Fail open on Firestore error — log but don't block legitimate users
-        logger.error({ uid, action, err, event: 'RATE_LIMIT_FIRESTORE_READ_ERROR' },
-          'Firestore read failed in user rate limiter — failing open');
-        return next();
-      }
-    }
-
-    // Reset if local window also expired
-    if (now - entry.windowStart > USER_RATE_WINDOW_MS) {
-      entry = { count: 0, windowStart: now, lastCached: now };
-      userRateCache.set(cacheKey, entry);
-    }
-
-    // ── Limit check ─────────────────────────────────────────────────────────
-    if (entry.count >= maxRequests) {
-      const retryAfterSec = Math.ceil((USER_RATE_WINDOW_MS - (now - entry.windowStart)) / 1000);
-      logger.warn(
-        { uid, action, count: entry.count, limit: maxRequests, retryAfterSec, event: 'USER_RATE_LIMIT_EXCEEDED' },
-        `User "${uid}" exceeded rate limit for "${action}" (${entry.count}/${maxRequests} req/hr)`
-      );
-      return res.status(429).json({
-        error: `Limite horário de "${action}" atingido (${maxRequests} req/hora por usuário). Aguarde antes de tentar novamente.`,
-        retryAfter: retryAfterSec
-      });
-    }
-
-    // ── Increment + async write-through to Firestore ─────────────────────────
-    entry.count++;
-    entry.lastCached = now;
-    userRateCache.set(cacheKey, entry);
-
-    const { count, windowStart } = entry;
-    admin.firestore()
-      .collection('rateLimits')
-      .doc(uid)
-      .set({ [action]: { count, windowStart, updatedAt: Date.now() } }, { merge: true })
-      .catch((err: any) =>
-        logger.error({ uid, action, err, event: 'RATE_LIMIT_FIRESTORE_WRITE_ERROR' },
-          'Async Firestore write failed in user rate limiter')
-      );
-
-    next();
-  };
-}
-
-// Baileys Store
-const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) as any });
-const storePath = path.join(__dirname, '.baileys_store.json');
-if (fs.existsSync(storePath)) {
-  store.readFromFile(storePath);
-}
-setInterval(() => {
-  store.writeToFile(storePath);
-}, 10000);
-
-// Initialize Firebase for server
-try {
-  const firebaseConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-  if (fs.existsSync(firebaseConfigPath)) {
-    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
-    const app = initializeApp(firebaseConfig);
-    console.log("Firebase initialized on server");
-    
-    // Initialize Firebase Admin
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        projectId: firebaseConfig.projectId,
-      });
-      console.log("Firebase Admin initialized");
-    }
-  } else {
-    console.warn("firebase-applet-config.json not found. Server-side Firebase features will be disabled.");
-  }
-} catch (error) {
-  console.error("Error initializing Firebase on server:", error);
-}
-
-// Middleware to protect API routes
-const requireAdmin = async (req: any, res: any, next: any) => {
-  const authHeader = req.headers.authorization;
-  console.log(`[Auth] Checking authorization for ${req.method} ${req.url}`);
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    logger.warn({ url: req.url, method: req.method, event: 'AUTH_MISSING_TOKEN' },
-      'Missing or invalid authorization header');
-    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
-  }
-  const token = authHeader.split('Bearer ')[1];
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    const uid = decodedToken.uid;
-
-    // Check if user is admin or editor using REST API
-    const firebaseConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-    if (fs.existsSync(firebaseConfigPath)) {
-      const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
-      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents/users/${uid}`;
-
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (response.ok) {
-        const userData = await response.json();
-        const role = userData.fields?.role?.stringValue;
-        if (role === 'admin' || role === 'editor') {
-          req.user = decodedToken;
-          return next();
-        }
-      } else {
-        logger.warn(
-          { uid, url: req.url, status: response.status, event: 'AUTH_ROLE_FETCH_FAILED' },
-          'Failed to fetch user role from Firestore REST API'
-        );
-      }
-    }
-    // Also check if it's the master owner
-    if (decodedToken.email === 'arthurfgalves@gmail.com' || decodedToken.email === '15599873676@nextcreatives.co') {
-      req.user = decodedToken;
-      return next();
-    }
-
-    logger.warn(
-      { uid, email: decodedToken.email, url: req.url, event: 'AUTH_FORBIDDEN' },
-      'Authenticated user does not have admin/editor access'
-    );
-    res.status(403).json({ error: 'Forbidden: Admin access required' });
-  } catch (error) {
-    logger.warn({ url: req.url, event: 'AUTH_INVALID_TOKEN', error }, 'Token verification failed');
-    res.status(401).json({ error: 'Unauthorized: Invalid token' });
-  }
-};
-
-// ─── requireOwner — Middleware RBAC: apenas o dono da agência ────────────────
-//
-// Verifica, via Admin SDK (sem depender de token client-side para o papel),
-// se o usuário logado é o owner. Critérios (qualquer um satisfaz):
-//   1. E-mail bate com os e-mails hardcoded do master
-//   2. employees/{uid}.isOwner === true  (owner cadastrado no Firestore)
-//
-// Usado em rotas que afetam: criação de usuários, configurações vitais,
-// faturamento e qualquer operação que um editor JAMAIS deve executar.
-// ─────────────────────────────────────────────────────────────────────────────
-const MASTER_EMAILS = new Set([
-  'arthurfgalves@gmail.com',
-  '15599873676@nextcreatives.co',
-]);
-
-const requireOwner = async (req: any, res: any, next: any) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: token ausente.' });
-  }
-  const token = authHeader.split('Bearer ')[1];
-
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    const uid = decodedToken.uid;
-
-    // Critério 1: e-mail master hardcoded
-    if (MASTER_EMAILS.has(decodedToken.email ?? '')) {
-      req.user = decodedToken;
-      return next();
-    }
-
-    // Critério 2: employees/{uid}.isOwner === true (via Admin SDK — bypass de regras)
-    const employeeSnap = await admin.firestore()
-      .collection('employees')
-      .doc(uid)
-      .get();
-
-    if (employeeSnap.exists && employeeSnap.data()?.isOwner === true) {
-      req.user = decodedToken;
-      return next();
-    }
-
-    logger.warn(
-      { uid, email: decodedToken.email, url: req.url, event: 'OWNER_FORBIDDEN' },
-      'Usuário autenticado não tem permissão de owner'
-    );
-    return res.status(403).json({
-      error: 'Forbidden: Esta operação requer permissão de proprietário.',
-    });
-  } catch (error) {
-    logger.warn({ url: req.url, event: 'OWNER_INVALID_TOKEN', error }, 'Token inválido no requireOwner');
-    return res.status(401).json({ error: 'Unauthorized: token inválido.' });
-  }
-};
-
-// ─── SMTP Transporter (Hostinger) ─────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// SMTP Transporter (Hostinger)
+// ════════════════════════════════════════════════════════════════════════════════
 const smtpTransporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.hostinger.com",
-  port: Number(process.env.SMTP_PORT) || 465,
+  host:   process.env.SMTP_HOST || 'smtp.hostinger.com',
+  port:   Number(process.env.SMTP_PORT) || 465,
   secure: true,
   auth: {
     user: process.env.SMTP_USER,
@@ -357,180 +68,236 @@ const smtpTransporter = nodemailer.createTransport({
   },
 });
 
-async function startServer() {
-  const app = express();
-  const httpServer = createHttpServer(app);
-  const io = new SocketIOServer(httpServer, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
-  });
-  const PORT = 3000;
+// ════════════════════════════════════════════════════════════════════════════════
+// WhatsApp — Gerenciamento de sessões em memória
+// (será extraído para src/backend/services/whatsapp.service.ts na Fase 2)
+// ════════════════════════════════════════════════════════════════════════════════
 
-  // ── Socket.IO Auth Middleware ──────────────────────────────────────────────
-  // Maps firebase uid -> socket for targeted emits
-  const userSockets = new Map<string, import("socket.io").Socket>();
+type WASessionStatus = 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready';
 
-  io.use(async (socket, next) => {
-    const token = socket.handshake.auth?.token as string | undefined;
-    if (!token) return next(new Error("Unauthorized: no token"));
-    try {
-      const decoded = await admin.auth().verifyIdToken(token);
-      (socket as any).uid = decoded.uid;
-      next();
-    } catch {
-      next(new Error("Unauthorized: invalid token"));
-    }
-  });
+interface WASession {
+  socket: any;
+  qr: string | null;
+  status: WASessionStatus;
+  userInfo: any;
+}
 
-  io.on("connection", (socket) => {
-    const uid = (socket as any).uid as string;
-    userSockets.set(uid, socket);
-    console.log(`[Socket.IO] Client connected: ${uid}`);
+/** Mapa UID → sessão WhatsApp ativa. */
+const sessions = new Map<string, WASession>();
 
-    socket.on("disconnect", () => {
-      userSockets.delete(uid);
-      console.log(`[Socket.IO] Client disconnected: ${uid}`);
+/**
+ * initializeWhatsApp — cria e gerencia uma sessão Baileys para um uid.
+ * Reconecta automaticamente (exceto quando loggedOut).
+ */
+async function initializeWhatsApp(uid: string): Promise<void> {
+  if (sessions.has(uid) && sessions.get(uid)?.socket) return;
+
+  sessions.set(uid, { socket: null, qr: null, status: 'connecting', userInfo: null });
+
+  try {
+    const { state, saveCreds } = await useFirestoreAuthState(uid);
+    const version = await getWAVersion();
+    logger.info({ uid, version: version.join('.'), event: 'WA_SESSION_INIT' }, `Usando WA v${version.join('.')}`);
+
+    const socket = makeWASocket({
+      version,
+      auth:               state,
+      printQRInTerminal:  false,
+      logger:             pino({ level: 'silent' }) as any,
     });
-  });
 
-  app.use(express.json());
+    sessions.get(uid)!.socket = socket;
+    store.bind(socket.ev);
 
-  // ── Rate Limiters ──────────────────────────────────────────────────────────
-  // WhatsApp send: 20 req / min per IP — prevents credit drain & spam floods
-  const waSendLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Limite de envio atingido. Tente novamente em 1 minuto.' }
-  });
+    // ── Eventos de conexão ────────────────────────────────────────────────────
+    socket.ev.on('connection.update', async (update: any) => {
+      const { connection, lastDisconnect, qr } = update;
+      const session = sessions.get(uid);
+      if (!session) return;
 
-  // Groq / Whisper transcription: 10 req / min per IP — each call bills tokens
-  const transcribeLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Limite de transcrição atingido. Tente novamente em 1 minuto.' }
-  });
+      if (qr) {
+        session.qr = await QRCode.toDataURL(qr);
+        session.status = 'qr';
+        userSockets.get(uid)?.emit('whatsapp:status', { status: 'qr', qr: session.qr, user: null });
+      }
 
-  // Lead search: 5 req / min per IP — Google Custom Search has a paid quota
-  const leadSearchLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Limite de busca de leads atingido. Tente novamente em 1 minuto.' }
-  });
+      if (connection === 'close') {
+        const statusCode   = (lastDisconnect?.error as any)?.output?.statusCode;
+        const isLoggedOut  = statusCode === DisconnectReason.loggedOut;
+        const shouldReconnect = !isLoggedOut;
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // RBAC — Guardas de prefixo de rota (owner-only)
-  //
-  // Qualquer rota sob /api/settings/* ou /api/tools/* exige role owner.
-  // O app.use() registra o middleware ANTES dos handlers específicos,
-  // bloqueando o acesso antes mesmo de chegar à lógica de negócio.
-  // /api/admin/users/* também está coberto — garantia dupla sobre a rota
-  // de criação de usuários que já usa requireOwner individualmente.
-  // ════════════════════════════════════════════════════════════════════════════
-  app.use('/api/settings', requireOwner);
-  app.use('/api/tools',    requireOwner);
-  app.use('/api/admin',    requireOwner);
+        logger.info({ uid, isLoggedOut, shouldReconnect, event: 'WA_CONNECTION_CLOSE' });
 
-  // API Health Check
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
+        session.status = 'disconnected';
+        session.socket = null;
+        session.qr     = null;
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // SYSTEM LOG — AI Debug Logger
-  // Receives structured error payloads from the Front-End (ErrorBoundary, try/catch).
-  // No auth required: captures errors from unauthenticated sessions too.
-  // Dual write: Pino terminal + Firestore ai_system_logs/{timestamp}_{uid}.
-  // ════════════════════════════════════════════════════════════════════════════
+        if (isLoggedOut) {
+          db.collection('whatsapp_sessions').doc(uid)
+            .set({ loggedOut: true, loggedOutAt: new Date().toISOString() }, { merge: true })
+            .catch(err => logger.warn({ uid, err: err.message }, 'Falha ao marcar loggedOut'));
+        }
 
-  // Rate limiter: 30 log writes / min per IP — prevents log-flood DoS
-  const logLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 30,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Log rate limit exceeded.' }
-  });
+        userSockets.get(uid)?.emit('whatsapp:status', { status: 'disconnected', qr: null, user: null });
 
-  app.post("/api/system/log", logLimiter, async (req: any, res: any) => {
+        if (shouldReconnect) {
+          setTimeout(() => initializeWhatsApp(uid), 5_000);
+        }
+      }
+
+      if (connection === 'open') {
+        logger.info({ uid, event: 'WA_READY' }, 'WhatsApp conectado');
+        const session = sessions.get(uid)!;
+        session.status   = 'ready';
+        session.qr       = null;
+        session.userInfo = socket.user;
+        userSockets.get(uid)?.emit('whatsapp:status', { status: 'ready', qr: null, user: socket.user });
+      }
+    });
+
+    socket.ev.on('creds.update', saveCreds);
+
+    socket.ev.on('messages.upsert', (m: any) => {
+      if (m.type === 'notify') {
+        for (const msg of m.messages) {
+          userSockets.get(uid)?.emit('whatsapp:message', msg);
+        }
+      }
+    });
+
+  } catch (error) {
+    logger.error({ uid, error, event: 'WA_INIT_ERROR' }, 'Erro ao inicializar WhatsApp');
+    const session = sessions.get(uid);
+    if (session) { session.status = 'disconnected'; session.socket = null; session.qr = null; }
+  }
+}
+
+/**
+ * restoreSessions — reconecta sessões ativas do Firestore ao iniciar o servidor.
+ * Ignora sessões com loggedOut:true ou sem credenciais.
+ */
+async function restoreSessions(): Promise<void> {
+  try {
+    const snapshot = await db.collection('whatsapp_sessions').get();
+    let restored = 0, skipped = 0;
+
+    for (const doc of snapshot.docs) {
+      const data = doc.data();
+      if (data?.loggedOut === true || !data?.creds) { skipped++; continue; }
+      initializeWhatsApp(doc.id);
+      restored++;
+    }
+
+    logger.info({ event: 'WA_RESTORE_DONE', restored, skipped });
+  } catch (error: any) {
+    logger.error({ event: 'WA_RESTORE_ERROR', err: error.message });
+  }
+}
+
+// ── Helper: Lead Scoring ──────────────────────────────────────────────────────
+function calculateLeadScore(chat: any, lastMessage: any): number {
+  let score = 50;
+  if (chat.unreadCount) score += chat.unreadCount * 5;
+  if (lastMessage && !lastMessage.key.fromMe) {
+    const diff = Date.now() / 1000 - (lastMessage.messageTimestamp || 0);
+    if (diff < 3600)  score += 20;
+    else if (diff < 86400) score += 10;
+  }
+  return Math.min(100, Math.max(0, score));
+}
+
+// ── Script Generator System Prompt ───────────────────────────────────────────
+const SCRIPT_SYSTEM_PROMPT = `You are an elite video scriptwriter and AI prompt engineer specializing in ultra-high-conversion video content for digital marketing agencies.
+
+YOUR ONLY OUTPUT IS A SINGLE RAW JSON OBJECT.
+- DO NOT write markdown. DO NOT use \`\`\`json fences. DO NOT add explanations.
+- DO NOT add any text before or after the JSON.
+- The JSON must be valid and parseable by JSON.parse() with zero preprocessing.
+- Any deviation from pure JSON will cause a critical system failure.
+
+OUTPUT SCHEMA (follow it exactly — no extra or missing keys):
+{
+  "title": "string — creative, punchy video title (max 12 words)",
+  "scenes": [
+    {
+      "id": number,
+      "setting": "string — screenplay format: INT./EXT. LOCATION - TIME",
+      "title": "string — evocative scene name (3-6 words)",
+      "description": "string — cinematic narrative description, 3-5 sentences",
+      "tags": ["array", "of", "visual", "style", "tags"]
+    }
+  ],
+  "prompts": [
+    {
+      "sceneId": number,
+      "prompt_text": "string — ultra-detailed Midjourney/Runway prompt starting with /imagine prompt:"
+    }
+  ]
+}
+
+RULES:
+- Generate between 3 and 6 scenes per script.
+- Each scene must have exactly one matching prompt (sceneId links them).
+- Narrative arc: Hook → Problem/Desire → Solution/Proof → CTA.
+- Language of all text fields: Brazilian Portuguese (except tags and prompt_text which stay in English).`;
+
+// ════════════════════════════════════════════════════════════════════════════════
+// startServer — registra rotas e inicia o listener
+// ════════════════════════════════════════════════════════════════════════════════
+async function startServer() {
+
+  // ── SYSTEM LOG ──────────────────────────────────────────────────────────────
+  app.post('/api/system/log', logLimiter, async (req: any, res: any) => {
     try {
-      const {
-        level     = 'error',
-        message   = '(no message)',
-        component,
-        stack,
-        context,
-        uid,
-        url,
-        userAgent,
-      } = req.body ?? {};
+      const parsed = SystemLogSchema.safeParse(req.body ?? {});
+      const body   = parsed.success ? parsed.data : (req.body ?? {});
 
-      // ── Sanitize: cap field lengths to prevent oversized Firestore docs ──
       const sanitized = {
-        level:     String(level).slice(0, 20),
-        message:   String(message).slice(0, 2000),
-        component: component ? String(component).slice(0, 200) : null,
-        stack:     stack     ? String(stack).slice(0, 5000)    : null,
-        context:   context   ? JSON.parse(JSON.stringify(context)) : null,
-        uid:       uid       ? String(uid).slice(0, 128)        : null,
-        url:       url       ? String(url).slice(0, 500)        : null,
-        userAgent: userAgent ? String(userAgent).slice(0, 300)  : null,
+        level:     String(body.level     ?? 'error').slice(0, 20),
+        message:   String(body.message   ?? '(no message)').slice(0, 2000),
+        component: body.component ? String(body.component).slice(0, 200) : null,
+        stack:     body.stack     ? String(body.stack).slice(0, 5000)    : null,
+        context:   body.context   ? JSON.parse(JSON.stringify(body.context)) : null,
+        uid:       body.uid       ? String(body.uid).slice(0, 128)        : null,
+        url:       body.url       ? String(body.url).slice(0, 500)        : null,
+        userAgent: body.userAgent ? String(body.userAgent).slice(0, 300)  : null,
         serverTs:  Date.now(),
         env:       process.env.NODE_ENV ?? 'development',
       };
 
-      // ── 1. Pino terminal (visible in dev + VPS stdout) ───────────────────
-      const pinoLevel = ['error', 'warn', 'info', 'debug'].includes(sanitized.level)
-        ? sanitized.level as 'error' | 'warn' | 'info' | 'debug'
-        : 'error';
+      const lvl = (['error','warn','info','debug'] as const).includes(sanitized.level as any)
+        ? sanitized.level as 'error' | 'warn' | 'info' | 'debug' : 'error';
 
-      logger[pinoLevel](
-        { event: 'FRONTEND_LOG', ...sanitized },
-        `[FE] ${sanitized.component ?? 'unknown'}: ${sanitized.message}`
-      );
+      logger[lvl]({ event: 'FRONTEND_LOG', ...sanitized },
+        `[FE] ${sanitized.component ?? 'unknown'}: ${sanitized.message}`);
 
-      // ── 2. Firestore: ai_system_logs/{timestamp}_{uid_or_anon} ───────────
       const docId = `${sanitized.serverTs}_${sanitized.uid ?? 'anon'}`;
-      await admin.firestore()
-        .collection('ai_system_logs')
-        .doc(docId)
-        .set(sanitized);
+      await db.collection('ai_system_logs').doc(docId).set(sanitized);
 
       res.status(201).json({ ok: true, id: docId });
     } catch (err: any) {
-      logger.error({ event: 'SYSTEM_LOG_WRITE_ERROR', err: err.message }, 'Failed to write system log');
-      // Always return 201 to the FE — never let logging break the UX
+      logger.error({ event: 'SYSTEM_LOG_WRITE_ERROR', err: err.message });
       res.status(201).json({ ok: false });
     }
   });
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // AUTH — Password Recovery via SMTP
-  // ════════════════════════════════════════════════════════════════════════════
-
-  app.post("/api/auth/forgot-password", async (req: any, res: any) => {
-    const { email } = req.body;
-
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: "E-mail inválido." });
+  // ── AUTH — Recuperação de senha ──────────────────────────────────────────────
+  app.post('/api/auth/forgot-password', async (req: any, res: any) => {
+    const parsed = ForgotPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'E-mail inválido.' });
     }
+    const { email } = parsed.data;
 
     try {
       const resetLink = await admin.auth().generatePasswordResetLink(email, {
-        url: `${process.env.APP_URL || "http://localhost:3000"}/login`,
+        url: `${process.env.APP_URL || 'http://localhost:3000'}/login`,
       });
 
-      const fromName = process.env.SMTP_FROM_NAME || "Next Creative";
-      const fromEmail = process.env.SMTP_USER;
-
       await smtpTransporter.sendMail({
-        from: `"${fromName}" <${fromEmail}>`,
-        to: email,
-        subject: "Recuperação de senha — Next Creative",
+        from:    `"${process.env.SMTP_FROM_NAME || 'Next Creative'}" <${process.env.SMTP_USER}>`,
+        to:      email,
+        subject: 'Recuperação de senha — Next Creative',
         html: `
           <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0f0f0f;color:#fff;border-radius:12px;">
             <h2 style="color:#a855f7;margin-bottom:8px;">Recuperação de senha</h2>
@@ -546,396 +313,174 @@ async function startServer() {
         `,
       });
 
-      return res.json({ success: true, message: "Se o e-mail existir, um link de redefinição foi enviado." });
+      return res.json({ success: true, message: 'Se o e-mail existir, um link de redefinição foi enviado.' });
     } catch (error: any) {
-      if (error?.errorInfo?.code === "auth/user-not-found") {
-        return res.json({ success: true, message: "Se o e-mail existir, um link de redefinição foi enviado." });
+      if (error?.errorInfo?.code === 'auth/user-not-found') {
+        return res.json({ success: true, message: 'Se o e-mail existir, um link de redefinição foi enviado.' });
       }
-      console.error("❌ Erro na recuperação de senha:", error);
-      return res.status(500).json({ error: "Falha ao enviar e-mail de recuperação." });
+      logger.error({ event: 'FORGOT_PASSWORD_ERROR', err: error.message });
+      return res.status(500).json({ error: 'Falha ao enviar e-mail de recuperação.' });
     }
   });
 
-  // ── WhatsApp in-memory session state ────────────────────────────────────────
-  // Cada entrada vive enquanto o processo estiver rodando.
-  // Ao reiniciar, restoreSessions() repopula a partir do Firestore.
-  const sessions = new Map<string, {
-    socket: any,
-    qr: string | null,
-    status: 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready',
-    userInfo: any
-  }>();
+  // ── WhatsApp — Status / QR / Connect / Pair / Logout ────────────────────────
 
-  // Cache da versão do Baileys — evita N chamadas à CDN do WhatsApp no restart
-  let _waVersion: [number, number, number] | null = null;
-  const getWAVersion = async (): Promise<[number, number, number]> => {
-    if (_waVersion) return _waVersion;
-    const { version } = await fetchLatestBaileysVersion();
-    _waVersion = version;
-    return version;
-  };
-
-  const initializeWhatsApp = async (uid: string) => {
-    if (sessions.has(uid) && sessions.get(uid)?.socket) return;
-
-    sessions.set(uid, {
-      socket: null,
-      qr: null,
-      status: 'connecting',
-      userInfo: null
-    });
-
-    try {
-      const { state, saveCreds } = await useFirestoreAuthState(uid);
-      const version = await getWAVersion();
-      console.log(`[${uid}] using WA v${version.join('.')}`);
-
-      const socket = makeWASocket({
-        version,
-        auth: state,
-        printQRInTerminal: false,
-        logger: pino({ level: 'silent' }) as any
-      });
-
-      sessions.get(uid)!.socket = socket;
-      store.bind(socket.ev);
-
-      socket.ev.on('connection.update', async (update: any) => {
-        const { connection, lastDisconnect, qr } = update;
-        const session = sessions.get(uid);
-        if (!session) return;
-
-        if (qr) {
-          console.log(`[${uid}] WhatsApp QR Received`);
-          session.qr = await QRCode.toDataURL(qr);
-          session.status = 'qr';
-        }
-
-        if (connection === 'close') {
-          const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-          const shouldReconnect = !isLoggedOut;
-
-          console.log(`[${uid}] WhatsApp closed. loggedOut=${isLoggedOut}, reconnect=${shouldReconnect}`);
-
-          session.status = 'disconnected';
-          session.socket = null;
-          session.qr = null;
-
-          // Marcar no Firestore que esta sessão foi deslogada pelo WhatsApp.
-          // restoreSessions() vai ignorar docs com loggedOut:true no próximo restart.
-          if (isLoggedOut) {
-            admin.firestore()
-              .collection('whatsapp_sessions').doc(uid)
-              .set({ loggedOut: true, loggedOutAt: new Date().toISOString() }, { merge: true })
-              .catch(err => logger.warn({ uid, err: err.message }, 'Falha ao marcar loggedOut no Firestore'));
-          }
-
-          userSockets.get(uid)?.emit('whatsapp:status', {
-            status: 'disconnected',
-            qr: null,
-            user: null
-          });
-
-          if (shouldReconnect) {
-            setTimeout(() => initializeWhatsApp(uid), 5000);
-          }
-        } else if (connection === 'open') {
-          console.log(`[${uid}] WhatsApp Ready`);
-          session.status = 'ready';
-          session.qr = null;
-          session.userInfo = socket.user;
-          // Emit ready state to frontend
-          userSockets.get(uid)?.emit('whatsapp:status', {
-            status: 'ready',
-            qr: null,
-            user: socket.user
-          });
-        }
-
-        // Emit QR updates to frontend in real-time
-        if (qr && session.qr) {
-          userSockets.get(uid)?.emit('whatsapp:status', {
-            status: 'qr',
-            qr: session.qr,
-            user: null
-          });
-        }
-      });
-
-      socket.ev.on('creds.update', saveCreds);
-
-      socket.ev.on('messages.upsert', (m: any) => {
-        if (m.type === 'notify') {
-          for (const msg of m.messages) {
-            console.log(`[${uid}] WhatsApp Message Received from ${msg.key.remoteJid}`);
-            // Push new message to the connected frontend client
-            userSockets.get(uid)?.emit('whatsapp:message', msg);
-          }
-        }
-      });
-    } catch (error) {
-      console.error(`[${uid}] Error initializing WhatsApp:`, error);
-      const session = sessions.get(uid);
-      if (session) {
-        session.status = 'disconnected';
-        session.socket = null;
-        session.qr = null;
-      }
-    }
-  };
-
-  // ── Restaura sessões ativas do Firestore ao iniciar o servidor ──────────────
-  //
-  // Reconecta automaticamente usuários que já haviam autenticado antes.
-  // Pula sessões marcadas como loggedOut (deslogadas pelo WhatsApp ou manualmente).
-  // Se as credenciais ainda forem válidas no lado do WA, reconecta sem QR Code.
-  const restoreSessions = async () => {
-    try {
-      const snapshot = await admin.firestore().collection('whatsapp_sessions').get();
-      let restored = 0, skipped = 0;
-
-      for (const doc of snapshot.docs) {
-        const data = doc.data();
-
-        // Pula sessões explicitamente deslogadas
-        if (data?.loggedOut === true) {
-          logger.info({ uid: doc.id, event: 'WA_RESTORE_SKIP_LOGOUT' }, 'Sessão loggedOut — ignorando');
-          skipped++;
-          continue;
-        }
-
-        // Pula docs sem credenciais (ex: sessão criada mas nunca autenticada)
-        if (!data?.creds) {
-          logger.info({ uid: doc.id, event: 'WA_RESTORE_SKIP_NO_CREDS' }, 'Sem credenciais — ignorando');
-          skipped++;
-          continue;
-        }
-
-        logger.info({ uid: doc.id, event: 'WA_RESTORE_START' }, 'Restaurando sessão WhatsApp');
-        initializeWhatsApp(doc.id);
-        restored++;
-      }
-
-      logger.info({ event: 'WA_RESTORE_DONE', restored, skipped }, `WhatsApp: ${restored} sessão(ões) restaurada(s), ${skipped} ignorada(s)`);
-    } catch (error: any) {
-      logger.error({ event: 'WA_RESTORE_ERROR', err: error.message }, 'Erro ao restaurar sessões WhatsApp');
-    }
-  };
-
-  // Start restoring sessions
-  restoreSessions();
-
-  // Initialize Video Automation Pipeline cron job
-  initializeCronJob();
-
-  // Helper: Lead Scoring
-  const calculateLeadScore = (chat: any, lastMessage: any): number => {
-    let score = 50; // Base score
-    
-    // 1. Unread count impact
-    if (chat.unreadCount) score += chat.unreadCount * 5;
-    
-    // 2. Recency impact (if last message is from them)
-    if (lastMessage && !lastMessage.key.fromMe) {
-        const now = Date.now() / 1000;
-        const diff = now - (lastMessage.messageTimestamp || 0);
-        if (diff < 3600) score += 20; // Last hour
-        else if (diff < 86400) score += 10; // Last day
-    }
-    
-    return Math.min(100, Math.max(0, score));
-  };
-
-  // WhatsApp CRM Endpoints
-  app.get("/api/whatsapp/chats", requireAdmin, async (req: any, res) => {
-    const uid = req.user.uid;
-    const session = sessions.get(uid);
-    if (!session || !session.socket || session.status !== 'ready') {
-      return res.status(400).json({ error: "WhatsApp not connected" });
-    }
-    const chats = store.chats.all();
-    const enrichedChats = await Promise.all(chats.map(async (chat) => {
-      const messages = await store.loadMessages(chat.id, 1, undefined);
-      const lastMessage = messages[messages.length - 1];
-      let text = 'Nova Mensagem';
-      if (lastMessage?.message?.conversation) text = lastMessage.message.conversation;
-      else if (lastMessage?.message?.extendedTextMessage?.text) text = lastMessage.message.extendedTextMessage.text;
-      else if (lastMessage?.message?.imageMessage) text = '📷 Imagem';
-      else if (lastMessage?.message?.videoMessage) text = '🎥 Vídeo';
-      else if (lastMessage?.message?.audioMessage) text = '🎵 Áudio';
-      else if (lastMessage?.message?.documentMessage) text = '📄 Documento';
-      
-      return {
-        ...chat,
-        lastMessageText: text,
-        lastMessageTimestamp: lastMessage?.messageTimestamp || chat.conversationTimestamp || chat.lastMsgTimestamp || Date.now() / 1000,
-        leadScore: calculateLeadScore(chat, lastMessage)
-      };
-    }));
-    res.json(enrichedChats);
+  app.get('/api/whatsapp/status', requireAdmin, (req: any, res) => {
+    const session = sessions.get(req.user.uid);
+    res.json({ status: session?.status || 'disconnected', qr: session?.qr || null, user: session?.userInfo || null });
   });
 
-  app.get("/api/whatsapp/messages/:jid", requireAdmin, async (req: any, res) => {
-    try {
-      const uid = req.user.uid;
-      const session = sessions.get(uid);
-      const { jid } = req.params;
-      if (!session || !session.socket || session.status !== 'ready') {
-        return res.status(400).json({ error: "WhatsApp not connected" });
-      }
-      const messages = await store.loadMessages(jid, 50, undefined);
-      res.json(messages);
-    } catch (error) {
-      console.error("Erro ao buscar mensagens WhatsApp:", error);
-      res.status(500).json({ error: "Falha ao buscar mensagens." });
-    }
-  });
-
-  app.get("/api/whatsapp/contacts", requireAdmin, (req, res) => {
-    try {
-      res.json(Object.values(store.contacts));
-    } catch (error) {
-      console.error("Erro ao buscar contatos WhatsApp:", error);
-      res.status(500).json({ error: "Falha ao buscar contatos." });
-    }
-  });
-
-  app.get("/api/whatsapp/status", requireAdmin, (req: any, res) => {
-    const uid = req.user.uid;
-    console.log(`[WhatsApp] Status requested for UID: ${uid}`);
-    const session = sessions.get(uid);
-    res.json({ 
-      status: session?.status || 'disconnected', 
-      qr: session?.qr || null,
-      user: session?.userInfo || null
-    });
-  });
-
-  app.post("/api/whatsapp/connect", requireAdmin, async (req: any, res) => {
+  app.post('/api/whatsapp/connect', requireAdmin, async (req: any, res) => {
     const uid = req.user.uid;
     let session = sessions.get(uid);
     if (!session || session.status === 'disconnected') {
-      // Limpa o flag loggedOut para permitir nova conexão e persistência
-      await admin.firestore()
-        .collection('whatsapp_sessions').doc(uid)
-        .set({ loggedOut: false }, { merge: true })
-        .catch(() => {});
+      await db.collection('whatsapp_sessions').doc(uid)
+        .set({ loggedOut: false }, { merge: true }).catch(() => {});
       await initializeWhatsApp(uid);
       session = sessions.get(uid);
     }
     res.json({ status: session?.status, qr: session?.qr });
   });
 
-  app.post("/api/whatsapp/pair", requireAdmin, async (req: any, res) => {
+  app.post('/api/whatsapp/pair', requireAdmin, async (req: any, res) => {
     try {
-      const uid = req.user.uid;
-      const { phone } = req.body;
-      if (!phone) {
-        return res.status(400).json({ error: 'Número de telefone é obrigatório.' });
-      }
+      const parsed = WhatsappPairSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: 'Número de telefone inválido.' });
+      const { phone } = parsed.data;
 
+      const uid = req.user.uid;
       let session = sessions.get(uid);
       if (!session || session.status === 'disconnected' || !session.socket) {
         await initializeWhatsApp(uid);
         session = sessions.get(uid);
-        // Wait a bit for the socket to initialize
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(r => setTimeout(r, 2_000));
       }
-
-      const cleanPhone = phone.replace(/\D/g, '');
-      const code = await session!.socket.requestPairingCode(cleanPhone);
+      const code = await session!.socket.requestPairingCode(phone);
       res.json({ code });
     } catch (error) {
-      console.error("Erro ao solicitar código de pareamento:", error);
-      res.status(500).json({ error: "Falha ao gerar código de pareamento." });
+      logger.error({ event: 'WA_PAIR_ERROR', error });
+      res.status(500).json({ error: 'Falha ao gerar código de pareamento.' });
     }
   });
 
-  app.post("/api/whatsapp/logout", requireAdmin, async (req: any, res) => {
+  app.post('/api/whatsapp/logout', requireAdmin, async (req: any, res) => {
     const uid = req.user.uid;
     const session = sessions.get(uid);
-    if (session && session.socket) {
-      try {
-        await session.socket.logout();
-      } catch (e) {
-        console.error("Error during WhatsApp logout:", e);
-      }
+    if (session?.socket) {
+      try { await session.socket.logout(); } catch (e) { /* ignorado */ }
       sessions.delete(uid);
     }
-    // Marca no Firestore: não reconectar no próximo restart do servidor
-    await admin.firestore()
-      .collection('whatsapp_sessions').doc(uid)
+    await db.collection('whatsapp_sessions').doc(uid)
       .set({ loggedOut: true, loggedOutAt: new Date().toISOString() }, { merge: true })
       .catch((err: any) => logger.warn({ uid, err: err.message }, 'Falha ao marcar loggedOut'));
     res.json({ success: true });
   });
 
-  app.post("/api/whatsapp/send", waSendLimiter, requireAdmin, createUserRateLimiter('whatsapp_send'), async (req: any, res) => {
+  // ── WhatsApp CRM ─────────────────────────────────────────────────────────────
+
+  app.get('/api/whatsapp/chats', requireAdmin, async (req: any, res) => {
+    const session = sessions.get(req.user.uid);
+    if (!session?.socket || session.status !== 'ready') {
+      return res.status(400).json({ error: 'WhatsApp não conectado.' });
+    }
+    const chats = store.chats.all();
+    const enriched = await Promise.all(chats.map(async (chat) => {
+      const messages   = await store.loadMessages(chat.id, 1, undefined);
+      const lastMessage = messages[messages.length - 1];
+      let text = 'Nova Mensagem';
+      if (lastMessage?.message?.conversation)                  text = lastMessage.message.conversation;
+      else if (lastMessage?.message?.extendedTextMessage?.text) text = lastMessage.message.extendedTextMessage.text;
+      else if (lastMessage?.message?.imageMessage)              text = '📷 Imagem';
+      else if (lastMessage?.message?.videoMessage)              text = '🎥 Vídeo';
+      else if (lastMessage?.message?.audioMessage)              text = '🎵 Áudio';
+      else if (lastMessage?.message?.documentMessage)           text = '📄 Documento';
+      return {
+        ...chat,
+        lastMessageText:      text,
+        lastMessageTimestamp: lastMessage?.messageTimestamp || chat.conversationTimestamp || Date.now() / 1000,
+        leadScore:            calculateLeadScore(chat, lastMessage),
+      };
+    }));
+    res.json(enriched);
+  });
+
+  app.get('/api/whatsapp/messages/:jid', requireAdmin, async (req: any, res) => {
     try {
-      const uid = req.user.uid;
-      const { phone, message } = req.body;
-      if (!phone || !message) {
-        return res.status(400).json({ error: 'Número e mensagem são obrigatórios.' });
+      const session = sessions.get(req.user.uid);
+      if (!session?.socket || session.status !== 'ready') {
+        return res.status(400).json({ error: 'WhatsApp não conectado.' });
       }
-
-      const session = sessions.get(uid);
-      if (!session || session.status !== 'ready' || !session.socket) {
-        return res.status(400).json({ error: 'WhatsApp não está conectado.' });
-      }
-
-      const cleanPhone = phone.replace(/\D/g, '') + '@s.whatsapp.net';
-      await session.socket.sendMessage(cleanPhone, { text: message });
-      res.json({ success: true });
+      const messages = await store.loadMessages(req.params.jid, 50, undefined);
+      res.json(messages);
     } catch (error) {
-      console.error("Erro ao enviar mensagem WhatsApp:", error);
-      res.status(500).json({ error: "Falha ao enviar mensagem." });
+      logger.error({ event: 'WA_MESSAGES_ERROR', error });
+      res.status(500).json({ error: 'Falha ao buscar mensagens.' });
     }
   });
 
-  app.post("/api/whatsapp/transcribe", transcribeLimiter, requireAdmin, createUserRateLimiter('transcribe'), async (req: any, res) => {
+  app.get('/api/whatsapp/contacts', requireAdmin, (req, res) => {
     try {
-      const uid = req.user.uid;
-      const { jid, msgId } = req.body;
-      if (!jid || !msgId) {
-        return res.status(400).json({ error: 'JID e ID da mensagem são obrigatórios.' });
+      res.json(Object.values(store.contacts));
+    } catch (error) {
+      logger.error({ event: 'WA_CONTACTS_ERROR', error });
+      res.status(500).json({ error: 'Falha ao buscar contatos.' });
+    }
+  });
+
+  // ── WhatsApp — Envio de mensagem ──────────────────────────────────────────────
+  app.post('/api/whatsapp/send', waSendLimiter, requireAdmin, createUserRateLimiter('whatsapp_send'), async (req: any, res) => {
+    try {
+      const parsed = WhatsappSendSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      const { phone, message } = parsed.data;
+
+      const session = sessions.get(req.user.uid);
+      if (!session?.socket || session.status !== 'ready') {
+        return res.status(400).json({ error: 'WhatsApp não conectado.' });
+      }
+      await session.socket.sendMessage(`${phone}@s.whatsapp.net`, { text: message });
+      res.json({ success: true });
+    } catch (error) {
+      logger.error({ event: 'WA_SEND_ERROR', error });
+      res.status(500).json({ error: 'Falha ao enviar mensagem.' });
+    }
+  });
+
+  // ── WhatsApp — Transcrição de áudio ──────────────────────────────────────────
+  app.post('/api/whatsapp/transcribe', transcribeLimiter, requireAdmin, createUserRateLimiter('transcribe'), async (req: any, res) => {
+    try {
+      const parsed = WhatsappTranscribeSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      const { jid, msgId } = parsed.data;
+
+      const session = sessions.get(req.user.uid);
+      if (!session?.socket || session.status !== 'ready') {
+        return res.status(400).json({ error: 'WhatsApp não conectado.' });
       }
 
-      const session = sessions.get(uid);
-      if (!session || !session.socket || session.status !== 'ready') {
-        return res.status(400).json({ error: 'WhatsApp não está conectado.' });
-      }
-
-      // Find the message in the store
       const messages = await store.loadMessages(jid, 100, undefined);
       const msg = messages.find(m => m.key.id === msgId);
-
-      if (!msg || !msg.message?.audioMessage) {
+      if (!msg?.message?.audioMessage) {
         return res.status(404).json({ error: 'Mensagem de áudio não encontrada.' });
       }
 
+      const groqApiKey = process.env.GROQ_API_KEY;
+      if (!groqApiKey) return res.status(500).json({ error: 'GROQ_API_KEY não configurada.' });
+
       const { downloadMediaMessage } = await import('@whiskeysockets/baileys');
-      const buffer = await downloadMediaMessage(msg, 'buffer', {}, { 
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
         logger: pino({ level: 'silent' }) as any,
-        reuploadRequest: session.socket.updateMediaMessage
+        reuploadRequest: session.socket.updateMediaMessage,
       });
 
-      const groqApiKey = process.env.GROQ_API_KEY;
-      if (!groqApiKey) {
-        return res.status(500).json({ error: 'Chave de API da Groq não configurada.' });
-      }
-
       const formData = new FormData();
-      const blob = new Blob([new Uint8Array(buffer)], { type: 'audio/ogg' });
-      formData.append('file', blob, 'audio.ogg');
+      formData.append('file', new Blob([new Uint8Array(buffer)], { type: 'audio/ogg' }), 'audio.ogg');
       formData.append('model', 'whisper-large-v3');
 
       const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${groqApiKey}`
-        },
-        body: formData
+        headers: { Authorization: `Bearer ${groqApiKey}` },
+        body: formData,
       });
 
       if (!groqRes.ok) {
@@ -943,288 +488,203 @@ async function startServer() {
         return res.status(groqRes.status).json({ error: 'Erro na API da Groq', details: errData });
       }
 
-      const data = await groqRes.json();
-      res.json(data);
+      res.json(await groqRes.json());
     } catch (error) {
-      console.error("Erro na transcrição WhatsApp:", error);
-      res.status(500).json({ error: 'Falha interna na transcrição do WhatsApp.' });
+      logger.error({ event: 'WA_TRANSCRIBE_ERROR', error });
+      res.status(500).json({ error: 'Falha na transcrição.' });
     }
   });
 
-  // Groq Transcription Endpoint (Generic)
-  app.post("/api/transcribe", transcribeLimiter, requireAdmin, createUserRateLimiter('transcribe'), async (req, res) => {
+  // ── Transcrição genérica (URL) ────────────────────────────────────────────────
+  app.post('/api/transcribe', transcribeLimiter, requireAdmin, createUserRateLimiter('transcribe'), async (req, res) => {
     try {
       const { audioUrl } = req.body;
-      if (!audioUrl) {
-        return res.status(400).json({ error: 'URL do áudio é obrigatória.' });
-      }
+      if (!audioUrl) return res.status(400).json({ error: 'URL do áudio é obrigatória.' });
 
       const groqApiKey = process.env.GROQ_API_KEY;
-      if (!groqApiKey) {
-        return res.status(500).json({ error: 'Chave de API da Groq não configurada.' });
-      }
+      if (!groqApiKey) return res.status(500).json({ error: 'GROQ_API_KEY não configurada.' });
 
-      // Fetch the audio file
       const audioRes = await fetch(audioUrl);
-      if (!audioRes.ok) {
-        return res.status(400).json({ error: 'Falha ao baixar o arquivo de áudio.' });
-      }
-      const audioBuffer = await audioRes.arrayBuffer();
+      if (!audioRes.ok) return res.status(400).json({ error: 'Falha ao baixar o arquivo de áudio.' });
 
-      // Form data for Groq
       const formData = new FormData();
-      const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
-      formData.append('file', blob, 'audio.mp3');
+      formData.append('file', new Blob([await audioRes.arrayBuffer()], { type: 'audio/mpeg' }), 'audio.mp3');
       formData.append('model', 'whisper-large-v3');
 
       const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${groqApiKey}`
-        },
-        body: formData
+        headers: { Authorization: `Bearer ${groqApiKey}` },
+        body: formData,
       });
 
       if (!groqRes.ok) {
         const errData = await groqRes.json();
-        console.error("Groq API Error:", errData);
         return res.status(groqRes.status).json({ error: 'Erro na API da Groq', details: errData });
       }
 
-      const data = await groqRes.json();
-      res.json(data);
+      res.json(await groqRes.json());
     } catch (error) {
-      console.error("Erro na transcrição:", error);
+      logger.error({ event: 'TRANSCRIBE_ERROR', error });
       res.status(500).json({ error: 'Falha interna na transcrição.' });
     }
   });
 
-  // API Route: Buscar Leads (New Architecture)
-  app.post("/api/leads/search", leadSearchLimiter, requireAdmin, createUserRateLimiter('lead_search'), async (req, res) => {
+  // ── Lead Engine ───────────────────────────────────────────────────────────────
+  app.post('/api/leads/search', leadSearchLimiter, requireAdmin, createUserRateLimiter('lead_search'), async (req, res) => {
     try {
-      const { nicho, uid, savedUrls = [] } = req.body;
-      
-      if (!nicho || !uid) {
-        return res.status(400).json({ error: 'Nicho e UID são obrigatórios.' });
-      }
+      const parsed = LeadSearchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      const { nicho, uid, savedUrls } = parsed.data;
 
       const apiKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY?.trim();
-      const cx = process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID?.trim();
+      const cx     = process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID?.trim();
+      if (!apiKey || !cx) return res.status(500).json({ error: 'Configuração do Google Custom Search ausente.' });
 
-      if (!apiKey || !cx) {
-        return res.status(500).json({ error: 'Configuração do Google Custom Search ausente.' });
-      }
-
-      // Passo 1 - Acionamento por nicho
-      const queryStr = `"${nicho}" "contato" OR "whatsapp" -blog -jusbrasil -reclameaqui`;
-      
-      // Passo 2 - Varredura com proteção
+      const queryStr  = `"${nicho}" "contato" OR "whatsapp" -blog -jusbrasil -reclameaqui`;
       const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(queryStr)}&num=10`;
-      
+
       const searchRes = await fetch(searchUrl);
       if (!searchRes.ok) {
         const errData = await searchRes.json().catch(() => ({}));
-        console.error(`Google Search API Error (Status ${searchRes.status}):`, JSON.stringify(errData, null, 2));
-        return res.status(searchRes.status).json({ 
-          error: `Erro na Google Custom Search API (Status ${searchRes.status})`,
-          details: errData.error?.message || 'Erro desconhecido',
-          fullError: errData
+        return res.status(searchRes.status).json({
+          error:     `Erro na Google Custom Search API (Status ${searchRes.status})`,
+          details:   (errData as any).error?.message || 'Erro desconhecido',
+          fullError: errData,
         });
       }
 
-      const searchData = await searchRes.json();
-      const items = searchData.items || [];
-      
-      if (items.length === 0) {
-        return res.json({ message: 'Nenhum resultado encontrado.', leads: [] });
-      }
+      const searchData = await searchRes.json() as any;
+      const items      = searchData.items || [];
+      if (items.length === 0) return res.json({ message: 'Nenhum resultado encontrado.', leads: [] });
 
-      // Checar no Firestore se já existe em leadsColhidos (Otimizado)
-      const itemLinks = items.map((item: any) => item.link);
-      
+      const itemLinks        = items.map((i: any) => i.link) as string[];
       const urlsParaProcessar = itemLinks.filter((link: string) => !savedUrls.includes(link));
-
       if (urlsParaProcessar.length === 0) {
         return res.json({ message: 'Todos os leads encontrados já foram colhidos.', leads: [] });
       }
 
-      // Import p-limit dynamically because it's ESM
-      const pLimit = (await import('p-limit')).default;
+      const pLimit          = (await import('p-limit')).default;
       const limitConcurrency = pLimit(3);
-      const cheerio = await import('cheerio');
-      const { GoogleGenAI } = await import('@google/genai');
+      const cheerio          = await import('cheerio');
+      const { GoogleGenAI }  = await import('@google/genai');
       const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
       const userAgents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/16.6 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/119.0.0.0 Safari/537.36',
       ];
 
       const processUrl = async (url: string) => {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
-          
-          const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
-
-          const siteRes = await fetch(url, {
-            signal: controller.signal,
-            headers: { 'User-Agent': randomUA }
+          const timeoutId  = setTimeout(() => controller.abort(), 5_000);
+          const siteRes    = await fetch(url, {
+            signal:  controller.signal,
+            headers: { 'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)] },
           });
           clearTimeout(timeoutId);
-
           if (!siteRes.ok) return null;
 
           const html = await siteRes.text();
-          const $ = cheerio.load(html);
+          const $    = cheerio.load(html);
 
-          // Passo 3 - Radar de tecnologias
-          const temMetaPixel = html.includes("fbq(") || html.includes("fbevents.js");
-          const temGoogleAds = html.includes("gtag(") || html.includes("googletagmanager.com/gtm.js");
-          
-          const whatsMatch = html.match(/(?:https?:\/\/)?(?:wa\.me|api\.whatsapp\.com\/send\?phone=|web\.whatsapp\.com\/send\?phone=)\/?([0-9]+)/i);
-          const whatsapp = whatsMatch ? whatsMatch[1] : null;
-
-          const instaMatch = html.match(/https?:\/\/(www\.)?instagram\.com\/([a-zA-Z0-9_.-]+)/i);
-          const instagram = instaMatch ? instaMatch[0] : null;
-
+          const temMetaPixel  = html.includes('fbq(') || html.includes('fbevents.js');
+          const temGoogleAds  = html.includes('gtag(') || html.includes('googletagmanager.com/gtm.js');
+          const whatsMatch    = html.match(/(?:https?:\/\/)?(?:wa\.me|api\.whatsapp\.com\/send\?phone=)\/?([0-9]+)/i);
+          const whatsapp      = whatsMatch ? whatsMatch[1] : null;
+          const instaMatch    = html.match(/https?:\/\/(www\.)?instagram\.com\/([a-zA-Z0-9_.-]+)/i);
+          const instagram     = instaMatch ? instaMatch[0] : null;
           const gruposWhatsApp: string[] = [];
-          $('a[href*="chat.whatsapp.com"]').each((_, el) => {
-            const href = $(el).attr('href');
-            if (href) gruposWhatsApp.push(href);
-          });
+          $('a[href*="chat.whatsapp.com"]').each((_, el) => { const h = $(el).attr('href'); if (h) gruposWhatsApp.push(h); });
+          const cnpjMatch     = html.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
+          const cnpj          = cnpjMatch ? cnpjMatch[0] : null;
+          const dominio       = new URL(url).hostname.replace('www.', '');
+          const isShopify     = html.includes('cdn.shopify.com') || html.includes('shopify-checkout');
+          const hasVideo      = html.includes('<video') || html.includes('youtube.com/embed') || html.includes('vimeo.com');
 
-          const cnpjMatch = html.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
-          const cnpj = cnpjMatch ? cnpjMatch[0] : null;
-
-          const dominio = new URL(url).hostname.replace('www.', '');
-          const isShopify = html.includes('cdn.shopify.com') || html.includes('shopify-checkout');
-          const hasVideo = html.includes('<video') || html.includes('youtube.com/embed') || html.includes('vimeo.com');
-
-          // Passo 4 - Enriquecimento de dados
-          let razaoSocial = null;
-          let capitalSocial = null;
+          let razaoSocial = null, capitalSocial = null;
           if (cnpj) {
             try {
-              const cnpjClean = cnpj.replace(/\D/g, '');
-              const controllerCnpj = new AbortController();
-              const timeoutCnpj = setTimeout(() => controllerCnpj.abort(), 5000);
-              const cnpjRes = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjClean}`, { signal: controllerCnpj.signal });
-              clearTimeout(timeoutCnpj);
-              if (cnpjRes.ok) {
-                const cnpjData = await cnpjRes.json();
-                razaoSocial = cnpjData.razao_social || null;
-                capitalSocial = cnpjData.capital_social || null;
-              }
-            } catch (e) { console.error("BrasilAPI Error", e); }
+              const ctrl = new AbortController();
+              const tid  = setTimeout(() => ctrl.abort(), 5_000);
+              const r    = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj.replace(/\D/g,'')}`, { signal: ctrl.signal });
+              clearTimeout(tid);
+              if (r.ok) { const d = await r.json() as any; razaoSocial = d.razao_social || null; capitalSocial = d.capital_social || null; }
+            } catch { /* ignora */ }
           }
 
           let logo = null;
           try {
-            const controllerLogo = new AbortController();
-            const timeoutLogo = setTimeout(() => controllerLogo.abort(), 5000);
-            const logoRes = await fetch(`https://logo.clearbit.com/${dominio}`, { signal: controllerLogo.signal });
-            clearTimeout(timeoutLogo);
-            if (logoRes.ok) {
-              logo = `https://logo.clearbit.com/${dominio}`;
-            }
-          } catch (e) { console.error("Clearbit Error", e); }
+            const ctrl = new AbortController();
+            const tid  = setTimeout(() => ctrl.abort(), 5_000);
+            const r    = await fetch(`https://logo.clearbit.com/${dominio}`, { signal: ctrl.signal });
+            clearTimeout(tid);
+            if (r.ok) logo = `https://logo.clearbit.com/${dominio}`;
+          } catch { /* ignora */ }
 
           let aiData: any = {};
           if (ai) {
             try {
-              const prompt = `Analise o site ${url} do nicho ${nicho}. 
-              Sinais detectados: Pixel=${temMetaPixel}, GoogleAds=${temGoogleAds}, Shopify=${isShopify}, Tem Vídeo=${hasVideo}.
-              HTML (resumo): ${html.substring(0, 3000)}
-              
-              Gere um objeto JSON com os seguintes campos:
-              - score: número de 0 a 100 (potencial de conversão para venda de serviços de vídeo IA)
-              - painPanel: uma frase curta e impactante em português sobre a maior oportunidade perdida (ex: "Loja escala anúncios mas não tem vídeos de prova social")
-              - tags: array de strings com sinais (ex: ["Pixel Ativo", "Shopify", "Sem Vídeos"])
-              - trafficSignals: { runsAds: "SIM" ou "NÃO", platform: "Nome da Plataforma", format: "Estático" ou "Vídeo", pixel: "Detectado" ou "Não Detectado", videoPage: "Presente" ou "Ausente" }
-              - aiAnalysis: { positiveSigns: string[], negativeSigns: string[], suggestedTemplate: { name: string, description: string } }
-              - abordagemWhatsApp: uma mensagem persuasiva de abordagem em português.
+              const prompt = `Analise o site ${url} do nicho ${nicho}.
+Sinais detectados: Pixel=${temMetaPixel}, GoogleAds=${temGoogleAds}, Shopify=${isShopify}, Tem Vídeo=${hasVideo}.
+HTML (resumo): ${html.substring(0, 3000)}
 
-              Retorne APENAS o JSON.`;
+Gere um objeto JSON com: score (0-100), painPanel (string), tags (array), trafficSignals, aiAnalysis, abordagemWhatsApp.
+Retorne APENAS o JSON.`;
 
               const aiRes = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
+                model:    'gemini-3-flash-preview',
                 contents: prompt,
-                config: { responseMimeType: 'application/json' }
+                config:   { responseMimeType: 'application/json' },
               });
-              
-              if (aiRes.text) {
-                aiData = JSON.parse(aiRes.text);
-              }
-            } catch (e) { console.error("Gemini Error", e); }
+              if (aiRes.text) aiData = JSON.parse(aiRes.text);
+            } catch { /* ignora */ }
           }
 
-          // Passo 5 - Salvamento no Firestore
-          const leadData = {
-            url,
-            dominio,
-            nicho,
-            temMetaPixel,
-            temGoogleAds,
-            whatsapp,
-            instagram,
-            gruposWhatsApp,
-            cnpj,
-            razaoSocial,
-            capitalSocial,
-            logo,
+          return {
+            url, dominio, nicho, temMetaPixel, temGoogleAds, whatsapp, instagram,
+            gruposWhatsApp, cnpj, razaoSocial, capitalSocial, logo,
             abordagemWhatsApp: aiData.abordagemWhatsApp || null,
-            score: aiData.score || 0,
-            painPanel: aiData.painPanel || "Análise pendente",
-            tags: aiData.tags || [],
-            trafficSignals: aiData.trafficSignals || {
-              runsAds: temMetaPixel || temGoogleAds ? "SIM" : "NÃO",
-              platform: isShopify ? "Shopify" : "Desconhecida",
-              format: hasVideo ? "Vídeo" : "Estático",
-              pixel: temMetaPixel ? "Detectado" : "Não Detectado",
-              videoPage: hasVideo ? "Presente" : "Ausente"
+            score:             aiData.score || 0,
+            painPanel:         aiData.painPanel || 'Análise pendente',
+            tags:              aiData.tags || [],
+            trafficSignals:    aiData.trafficSignals || {
+              runsAds: temMetaPixel || temGoogleAds ? 'SIM' : 'NÃO',
+              platform: isShopify ? 'Shopify' : 'Desconhecida',
+              format:   hasVideo ? 'Vídeo' : 'Estático',
+              pixel:    temMetaPixel ? 'Detectado' : 'Não Detectado',
+              videoPage: hasVideo ? 'Presente' : 'Ausente',
             },
             aiAnalysis: aiData.aiAnalysis || {
-              positiveSigns: [],
-              negativeSigns: [],
-              suggestedTemplate: { name: "Padrão", description: "Abordagem genérica de conversão" }
+              positiveSigns: [], negativeSigns: [],
+              suggestedTemplate: { name: 'Padrão', description: 'Abordagem genérica de conversão' },
             },
-            status: "novo",
+            status:        'novo',
             discoveryDate: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            createdBy: uid,
-            updatedBy: uid
+            createdAt:     new Date().toISOString(),
+            createdBy:     uid,
+            updatedBy:     uid,
           };
-
-          return leadData;
-
-        } catch (error) {
-          console.error(`Erro ao processar ${url}:`, error);
-          return null;
-        }
+        } catch { return null; }
       };
 
-      const processPromises = urlsParaProcessar.map((url: string) => limitConcurrency(() => processUrl(url)));
-      const results = await Promise.all(processPromises);
-      
+      const results    = await Promise.all(urlsParaProcessar.map((url: string) => limitConcurrency(() => processUrl(url))));
       const leadsSalvos = results.filter(r => r !== null);
-
-      res.json({ sucesso: true, message: `${leadsSalvos.length} leads colhidos e salvos.`, leads: leadsSalvos });
+      res.json({ sucesso: true, message: `${leadsSalvos.length} leads colhidos.`, leads: leadsSalvos });
 
     } catch (error) {
-      console.error('Erro no motor de leads:', error);
+      logger.error({ event: 'LEADS_SEARCH_ERROR', error });
       res.status(500).json({ sucesso: false, error: 'Falha interna no motor de leads.' });
     }
   });
 
-  // Lead Engine: Run Shopify Scraper
-  app.post("/api/scrapers/shopify/run", requireOwner, async (req: any, res) => {
+  // ── Scraper Shopify ───────────────────────────────────────────────────────────
+  app.post('/api/scrapers/shopify/run', requireOwner, async (req: any, res) => {
     try {
-      const { urls } = req.body;
-      if (!urls || urls.length === 0) {
-        return res.status(400).json({ error: "Lista de URLs vazia." });
-      }
+      const parsed = ShopifyScraperSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: 'Lista de URLs inválida.' });
+      const { urls } = parsed.data;
 
       res.setHeader('Content-Type', 'application/x-ndjson');
       res.setHeader('Transfer-Encoding', 'chunked');
@@ -1232,335 +692,171 @@ async function startServer() {
       const scraperDir = path.join(process.cwd(), 'scrapers', 'shopify_scraper');
       if (!fs.existsSync(scraperDir)) fs.mkdirSync(scraperDir, { recursive: true });
 
-      const timestamp = Date.now();
-      const inputFilename = path.join(scraperDir, `input_${timestamp}.txt`);
+      const timestamp      = Date.now();
+      const inputFilename  = path.join(scraperDir, `input_${timestamp}.txt`);
       const outputFilename = path.join(scraperDir, `output_${timestamp}.json`);
-
       fs.writeFileSync(inputFilename, urls.join('\n'));
 
       const pythonProcess = spawn('python', ['shopify_scraper.py', inputFilename, '--output', outputFilename], { cwd: scraperDir });
+      let processedCount  = 0;
+      const runStartedAt  = new Date().toISOString();
 
-      let processedCount = 0;
-      const totalUrls = urls.length;
-      const runStartedAt = new Date().toISOString();
-
-      // Escreve estado inicial para o painel NextZap ver "0 de N leads processados"
-      admin.firestore().collection('scraper_metadata').doc('stats').set({
-        shopify: {
-          processados: 0,
-          total: totalUrls,
-          totalLeads: 0,
-          queueProgress: 0,
-          lastRun: runStartedAt,
-          currentStatus: 'running',
-        }
+      db.collection('scraper_metadata').doc('stats').set({
+        shopify: { processados: 0, total: urls.length, totalLeads: 0, queueProgress: 0, lastRun: runStartedAt, currentStatus: 'running' },
       }, { merge: true }).catch(() => {});
 
       pythonProcess.stdout.on('data', (data: any) => {
-        const lines = data.toString().split('\n').filter(Boolean);
-        for (const line of lines) {
+        for (const line of data.toString().split('\n').filter(Boolean)) {
           res.write(JSON.stringify({ type: 'log', text: line }) + '\n');
-          // Python scraper logs "  → store_name | ..." for each completed store
           if (line.includes(' → ')) {
             processedCount++;
-            // Atualiza Firestore a cada 5 lojas para mostrar "X de Y" em tempo real
-            if (processedCount % 5 === 0 || processedCount === totalUrls) {
-              admin.firestore().collection('scraper_metadata').doc('stats').set({
-                shopify: {
-                  processados: processedCount,
-                  total: totalUrls,
-                  totalLeads: processedCount,
-                  queueProgress: Math.round((processedCount / totalUrls) * 100),
-                  lastRun: runStartedAt,
-                  currentStatus: 'running',
-                }
+            if (processedCount % 5 === 0 || processedCount === urls.length) {
+              db.collection('scraper_metadata').doc('stats').set({
+                shopify: { processados: processedCount, total: urls.length, totalLeads: processedCount, queueProgress: Math.round(processedCount / urls.length * 100), lastRun: runStartedAt, currentStatus: 'running' },
               }, { merge: true }).catch(() => {});
             }
           }
         }
       });
+
       pythonProcess.stderr.on('data', (data: any) => {
-        const lines = data.toString().split('\n').filter(Boolean);
-        for (const line of lines) res.write(JSON.stringify({ type: 'log', text: line }) + '\n');
+        for (const line of data.toString().split('\n').filter(Boolean)) {
+          res.write(JSON.stringify({ type: 'log', text: line }) + '\n');
+        }
       });
 
-      pythonProcess.on('close', (code: any) => {
-        // Escreve estado final — progresso completo visível no NextZap
-        admin.firestore().collection('scraper_metadata').doc('stats').set({
-          shopify: {
-            processados: processedCount,
-            total: totalUrls,
-            totalLeads: processedCount,
-            queueProgress: 100,
-            lastRun: runStartedAt,
-            currentStatus: 'stopped',
-          }
+      pythonProcess.on('close', () => {
+        db.collection('scraper_metadata').doc('stats').set({
+          shopify: { processados: processedCount, total: urls.length, totalLeads: processedCount, queueProgress: 100, lastRun: runStartedAt, currentStatus: 'stopped' },
         }, { merge: true }).catch(() => {});
 
         try {
           if (fs.existsSync(outputFilename)) {
-             const results = JSON.parse(fs.readFileSync(outputFilename, 'utf8'));
-             res.write(JSON.stringify({ type: 'done', success: true, results }) + '\n');
+            const results = JSON.parse(fs.readFileSync(outputFilename, 'utf8'));
+            res.write(JSON.stringify({ type: 'done', success: true, results }) + '\n');
           } else {
-             res.write(JSON.stringify({ type: 'done', success: false, error: "Scraper não gerou arquivo de saída." }) + '\n');
+            res.write(JSON.stringify({ type: 'done', success: false, error: 'Scraper não gerou arquivo de saída.' }) + '\n');
           }
         } catch (e: any) {
-             res.write(JSON.stringify({ type: 'done', success: false, error: "Falha ao ler resultado do scraper: " + e.message }) + '\n');
+          res.write(JSON.stringify({ type: 'done', success: false, error: `Falha ao ler resultado: ${e.message}` }) + '\n');
         }
         res.end();
       });
+
     } catch (err: any) {
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Falha interna.", details: err.message });
-      } else {
-        res.write(JSON.stringify({ type: 'done', success: false, error: err.message }) + '\n');
-        res.end();
-      }
+      if (!res.headersSent) res.status(500).json({ error: 'Falha interna.', details: err.message });
+      else { res.write(JSON.stringify({ type: 'done', success: false, error: err.message }) + '\n'); res.end(); }
     }
   });
 
-  // ── Vercel Cron: buscar leads diariamente ─────────────────────────────────
-  // Protected by CRON_SECRET — Vercel Cron sends: Authorization: Bearer <CRON_SECRET>
-  // Firebase Auth is NOT used here; this endpoint has no user context.
-  app.get("/api/cron/buscar-leads", async (req: any, res: any) => {
+  // ── Cron — Busca de leads agendada ───────────────────────────────────────────
+  app.get('/api/cron/buscar-leads', async (req: any, res: any) => {
     const cronSecret = process.env.CRON_SECRET;
-    if (!cronSecret) {
-      console.error("[Cron] CRON_SECRET not configured — rejecting request");
-      return res.status(500).json({ error: "Cron secret not configured." });
-    }
-    const authHeader = req.headers.authorization;
-    if (!authHeader || authHeader !== `Bearer ${cronSecret}`) {
-      console.warn("[Cron] Unauthorized cron attempt");
-      return res.status(401).json({ error: "Unauthorized." });
-    }
+    if (!cronSecret) return res.status(500).json({ error: 'Cron secret não configurado.' });
+    if (req.headers.authorization !== `Bearer ${cronSecret}`) return res.status(401).json({ error: 'Unauthorized.' });
     try {
-      console.log("[Cron] /api/cron/buscar-leads triggered by Vercel scheduler");
-      // Fire-and-forget: runs the same lead search pipeline used by admins
-      // Add your lead collection logic here or call an existing service
-      res.json({ success: true, message: "Lead collection cron triggered." });
+      logger.info({ event: 'CRON_LEAD_TRIGGERED' }, 'Cron de leads acionado');
+      res.json({ success: true, message: 'Lead collection cron triggered.' });
     } catch (err: any) {
-      console.error("[Cron] Lead search failed:", err.message);
-      res.status(500).json({ error: "Cron job failed.", details: err.message });
+      logger.error({ event: 'CRON_LEAD_ERROR', err: err.message });
+      res.status(500).json({ error: 'Cron job failed.', details: err.message });
     }
   });
 
-  // Manual trigger for Video Automation Pipeline (admin only, fire-and-forget)
-  app.post("/api/automation/video-pipeline/run", requireAdmin, createUserRateLimiter('video_pipeline'), async (req: any, res: any) => {
+  // ── Video Pipeline ────────────────────────────────────────────────────────────
+  app.post('/api/automation/video-pipeline/run', requireAdmin, createUserRateLimiter('video_pipeline'), async (req: any, res: any) => {
     try {
-      const userEmail = req.user?.email;
-      console.log(`[Pipeline] Manual trigger by: ${userEmail}`);
-      runVideoPipeline('manual', userEmail).catch((err: any) =>
-        console.error('[Pipeline] Unhandled error in manual trigger:', err)
+      logger.info({ event: 'PIPELINE_MANUAL_TRIGGER', user: req.user?.email });
+      runVideoPipeline('manual', req.user?.email).catch((err: any) =>
+        logger.error({ event: 'PIPELINE_UNHANDLED_ERROR', err: err.message })
       );
-      res.json({
-        success: true,
-        message: 'Pipeline iniciado. Acompanhe o progresso em videoPipelineRuns no Firestore.',
-      });
+      res.json({ success: true, message: 'Pipeline iniciado. Acompanhe em videoPipelineRuns no Firestore.' });
     } catch (err: any) {
       res.status(500).json({ error: 'Falha ao iniciar o pipeline.', details: err.message });
     }
   });
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // ADMIN — Criação segura de funcionários/editores
-  //
-  // Usa Firebase Admin SDK para criar o usuário no Auth sem deslogar o Admin.
-  // Transação segura: se o Firestore falhar, o usuário do Auth é deletado
-  // imediatamente, prevenindo contas "fantasmas".
-  // ════════════════════════════════════════════════════════════════════════════
-  app.post("/api/admin/users/create", requireOwner, async (req: any, res: any) => {
-    const { name, login, password, role } = req.body ?? {};
-
-    if (!name || !login || !password) {
-      return res.status(400).json({ error: "Nome, login e senha são obrigatórios." });
-    }
-    if (typeof name !== 'string' || typeof login !== 'string' || typeof password !== 'string') {
-      return res.status(400).json({ error: "Campos inválidos." });
-    }
-    if (password.length < 6) {
-      return res.status(400).json({ error: "A senha deve ter pelo menos 6 caracteres." });
+  // ── Admin — Criar usuário/editor ──────────────────────────────────────────────
+  app.post('/api/admin/users/create', requireOwner, async (req: any, res: any) => {
+    const parsed = CreateUserSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const errs = parsed.error.flatten().fieldErrors;
+      const msg  = Object.values(errs).flat()[0] || 'Dados inválidos.';
+      return res.status(400).json({ error: msg });
     }
 
-    const sanitizedLogin = login.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9.-]/g, '');
-    if (!sanitizedLogin) {
-      return res.status(400).json({ error: "Login inválido. Use apenas letras, números, ponto ou hífen." });
-    }
+    const { name, login, password, role } = parsed.data;
+    const sanitizedLogin = login.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9._-]/g, '');
+    if (!sanitizedLogin) return res.status(400).json({ error: 'Login inválido.' });
 
-    const email = `${sanitizedLogin}@nextcreatives.internal`;
-    const memberRole = (role === 'editor' || role === 'admin' || role === 'vendedor') ? role : 'editor';
-
+    const email      = `${sanitizedLogin}@nextcreatives.internal`;
+    const memberRole = role ?? 'editor';
     let createdUid: string | null = null;
 
     try {
-      // 1. Cria o usuário no Firebase Auth (sem afetar a sessão do Admin logado)
-      const userRecord = await admin.auth().createUser({
-        email,
-        password,
-        displayName: name.trim(),
-      });
+      const userRecord = await admin.auth().createUser({ email, password, displayName: name.trim() });
       createdUid = userRecord.uid;
 
-      // 2. Calcula iniciais
       const initials = name.trim().split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() || 'NU';
+      const batch    = db.batch();
 
-      // 3. Cria o documento no Firestore (employees + users)
-      const db = admin.firestore();
-      const batch = db.batch();
-
-      // Documento na coleção employees (lido pelo useEmployees)
-      const employeeRef = db.collection('employees').doc(createdUid);
-      batch.set(employeeRef, {
-        name: name.trim(),
-        role: memberRole,
-        login: sanitizedLogin,
-        password,               // armazenado para referência do admin
-        initials,
-        lastLogin: 'Nunca',
-        userId: createdUid,
-        isOwner: false,
-        createdAt: new Date().toISOString(),
-        createdBy: req.user.uid,
+      batch.set(db.collection('employees').doc(createdUid), {
+        name: name.trim(), role: memberRole, login: sanitizedLogin,
+        password, initials, lastLogin: 'Nunca',
+        userId: createdUid, isOwner: false,
+        createdAt: new Date().toISOString(), createdBy: req.user.uid,
       });
 
-      // Documento na coleção users (lido pelo useAuth / requireAdmin)
-      const userRef = db.collection('users').doc(createdUid);
-      batch.set(userRef, {
-        name: name.trim(),
-        role: memberRole,
-        email,
-        userId: createdUid,
-        isOwner: false,
-        createdAt: new Date().toISOString(),
-        createdBy: req.user.uid,
+      batch.set(db.collection('users').doc(createdUid), {
+        name: name.trim(), role: memberRole, email,
+        userId: createdUid, isOwner: false,
+        createdAt: new Date().toISOString(), createdBy: req.user.uid,
       });
 
       await batch.commit();
 
-      logger.info(
-        { event: 'ADMIN_USER_CREATED', uid: createdUid, login: sanitizedLogin, role: memberRole, createdBy: req.user.uid },
-        `Novo usuário criado: ${sanitizedLogin}`
-      );
-
-      return res.status(201).json({
-        success: true,
-        uid: createdUid,
-        message: `Acesso criado com sucesso para ${name.trim()}.`,
-      });
+      logger.info({ event: 'ADMIN_USER_CREATED', uid: createdUid, login: sanitizedLogin, role: memberRole });
+      return res.status(201).json({ success: true, uid: createdUid, message: `Acesso criado para ${name.trim()}.` });
 
     } catch (error: any) {
-      // 4. Rollback: se o Firestore falhar após o Auth já ter criado, deleta o usuário Auth
       if (createdUid && error?.code !== 'auth/email-already-exists') {
-        try {
-          await admin.auth().deleteUser(createdUid);
-          logger.warn({ event: 'ADMIN_USER_ROLLBACK', uid: createdUid }, 'Usuário Auth deletado após falha no Firestore');
-        } catch (rollbackErr: any) {
-          logger.error({ event: 'ADMIN_USER_ROLLBACK_FAILED', uid: createdUid, err: rollbackErr.message }, 'Falha no rollback do Auth');
-        }
+        await admin.auth().deleteUser(createdUid).catch(() => {});
+        logger.warn({ event: 'ADMIN_USER_ROLLBACK', uid: createdUid });
       }
-
-      // 5. Erros conhecidos com mensagens amigáveis
-      if (error?.code === 'auth/email-already-exists') {
-        return res.status(409).json({ error: `ID de acesso "${sanitizedLogin}" já está em uso. Escolha outro.` });
-      }
-      if (error?.code === 'auth/invalid-password') {
-        return res.status(400).json({ error: "Senha inválida. Mínimo de 6 caracteres." });
-      }
-
-      logger.error({ event: 'ADMIN_USER_CREATE_ERROR', err: error.message, code: error.code }, 'Erro ao criar usuário admin');
-      return res.status(500).json({ error: "Erro interno ao criar acesso. Tente novamente." });
+      if (error?.code === 'auth/email-already-exists') return res.status(409).json({ error: `Login "${sanitizedLogin}" já está em uso.` });
+      if (error?.code === 'auth/invalid-password')      return res.status(400).json({ error: 'Senha inválida. Mínimo 6 caracteres.' });
+      logger.error({ event: 'ADMIN_USER_CREATE_ERROR', err: error.message });
+      return res.status(500).json({ error: 'Erro interno ao criar acesso.' });
     }
   });
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // ADMIN — Gerador de Roteiro / Prompt (LLM)
-  //
-  // Recebe um briefing e uma engine ('groq' | 'gemini') e retorna um JSON
-  // estruturado com título, cenas e prompts estilo Midjourney/Runway.
-  //
-  // Segurança: requireOwner via middleware global (app.use '/api/admin')
-  //            + declarado explicitamente abaixo para clareza RBAC.
-  // ════════════════════════════════════════════════════════════════════════════
-  const SCRIPT_SYSTEM_PROMPT = `You are an elite video scriptwriter and AI prompt engineer specializing in ultra-high-conversion video content for digital marketing agencies.
-
-YOUR ONLY OUTPUT IS A SINGLE RAW JSON OBJECT.
-- DO NOT write markdown. DO NOT use \`\`\`json fences. DO NOT add explanations.
-- DO NOT add any text before or after the JSON.
-- The JSON must be valid and parseable by JSON.parse() with zero preprocessing.
-- Any deviation from pure JSON will cause a critical system failure.
-
-OUTPUT SCHEMA (follow it exactly — no extra or missing keys):
-{
-  "title": "string — creative, punchy video title (max 12 words)",
-  "scenes": [
-    {
-      "id": number,
-      "setting": "string — screenplay format: INT./EXT. LOCATION - TIME (ex: EXT. BUSY MARKET - GOLDEN HOUR)",
-      "title": "string — evocative scene name (3-6 words)",
-      "description": "string — cinematic narrative description: camera movement, visual details, emotional beat, color palette, 3-5 sentences",
-      "tags": ["array", "of", "visual", "style", "tags", "e.g.", "4K", "Cinematic", "Slow-motion"]
+  // ── Admin — Gerador de roteiro ────────────────────────────────────────────────
+  app.post('/api/admin/generate-script', requireOwner, async (req: any, res: any) => {
+    const parsed = GenerateScriptSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.flatten().fieldErrors.briefing?.[0] || 'Dados inválidos.' });
     }
-  ],
-  "prompts": [
-    {
-      "sceneId": number,
-      "prompt_text": "string — ultra-detailed Midjourney/Runway prompt starting with /imagine prompt: — include camera lens (e.g. 35mm f/1.4), lighting style, color grading (e.g. Kodak Vision3 LUT), motion direction, mood, art direction references, aspect ratio flag (--ar 16:9), version flag (--v 6.1)"
-    }
-  ]
-}
+    const { briefing, engine } = parsed.data;
 
-RULES FOR CONTENT:
-- Generate between 3 and 6 scenes per script.
-- Each scene must have exactly one matching prompt (sceneId links them).
-- Descriptions must be sensory and emotionally charged — make the viewer feel urgency, desire, or aspiration.
-- Prompts must be photorealistic and cinematographic. Include technical details that a professional DP would use.
-- The overall narrative arc must follow: Hook → Problem/Desire → Solution/Proof → CTA.
-- Write for maximum retention and conversion. Every word must earn its place.
-- Language of all text fields: Brazilian Portuguese (except technical tags and prompt_text which stay in English).`;
-
-  app.post("/api/admin/generate-script", requireOwner, async (req: any, res: any) => {
-    const { briefing, engine = 'groq' } = req.body ?? {};
-
-    if (!briefing || typeof briefing !== 'string' || briefing.trim().length < 10) {
-      return res.status(400).json({
-        error: 'O campo briefing é obrigatório e deve ter no mínimo 10 caracteres.',
-      });
-    }
-
-    const validEngines = ['groq', 'gemini'];
-    if (!validEngines.includes(engine)) {
-      return res.status(400).json({ error: `Engine inválida. Use: ${validEngines.join(' | ')}.` });
-    }
-
-    const userMessage = `BRIEFING DO CLIENTE:\n${briefing.trim()}\n\nGere o roteiro e os prompts agora. Retorne APENAS o JSON.`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    const userMessage  = `BRIEFING DO CLIENTE:\n${briefing.trim()}\n\nGere o roteiro e os prompts agora. Retorne APENAS o JSON.`;
+    const controller   = new AbortController();
+    const timeoutId    = setTimeout(() => controller.abort(), 30_000);
 
     try {
       let scriptData: any;
 
-      // ── Groq (llama-3.3-70b-versatile) ────────────────────────────────────
       if (engine === 'groq') {
         const groqKey = process.env.GROQ_API_KEY;
-        if (!groqKey) {
-          clearTimeout(timeoutId);
-          return res.status(500).json({ error: 'GROQ_API_KEY não configurada no servidor.' });
-        }
+        if (!groqKey) { clearTimeout(timeoutId); return res.status(500).json({ error: 'GROQ_API_KEY não configurada.' }); }
 
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${groqKey}`,
-          },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-              { role: 'system', content: SCRIPT_SYSTEM_PROMPT },
-              { role: 'user',   content: userMessage },
-            ],
-            temperature: 0.75,
-            max_tokens: 4096,
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
+          body:    JSON.stringify({
+            model:           'llama-3.3-70b-versatile',
+            messages:        [{ role: 'system', content: SCRIPT_SYSTEM_PROMPT }, { role: 'user', content: userMessage }],
+            temperature:     0.75,
+            max_tokens:      4096,
             response_format: { type: 'json_object' },
           }),
           signal: controller.signal,
@@ -1569,102 +865,70 @@ RULES FOR CONTENT:
         if (!groqRes.ok) {
           const errBody = await groqRes.json().catch(() => ({}));
           clearTimeout(timeoutId);
-          logger.error({ event: 'GENERATE_SCRIPT_GROQ_ERROR', status: groqRes.status, errBody }, 'Groq API error');
           return res.status(502).json({ error: 'Erro na API da Groq.', details: errBody });
         }
 
-        const groqData = await groqRes.json();
-        const rawContent: string | undefined = groqData.choices?.[0]?.message?.content;
+        const groqData = await groqRes.json() as any;
+        const raw: string | undefined = groqData.choices?.[0]?.message?.content;
+        if (!raw) { clearTimeout(timeoutId); return res.status(502).json({ error: 'Groq retornou resposta vazia.' }); }
+        scriptData = JSON.parse(raw);
 
-        if (!rawContent) {
-          clearTimeout(timeoutId);
-          return res.status(502).json({ error: 'A Groq retornou uma resposta vazia.' });
-        }
-
-        scriptData = JSON.parse(rawContent);
-
-      // ── Gemini ─────────────────────────────────────────────────────────────
       } else {
         const geminiKey = process.env.GEMINI_API_KEY;
-        if (!geminiKey) {
-          clearTimeout(timeoutId);
-          return res.status(500).json({ error: 'GEMINI_API_KEY não configurada no servidor.' });
-        }
+        if (!geminiKey) { clearTimeout(timeoutId); return res.status(500).json({ error: 'GEMINI_API_KEY não configurada.' }); }
 
         const { GoogleGenAI } = await import('@google/genai');
-        const ai = new GoogleGenAI({ apiKey: geminiKey });
-
-        const aiRes = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+        const aiClient = new GoogleGenAI({ apiKey: geminiKey });
+        const aiRes    = await aiClient.models.generateContent({
+          model:    'gemini-3-flash-preview',
           contents: `${SCRIPT_SYSTEM_PROMPT}\n\n${userMessage}`,
-          config: { responseMimeType: 'application/json' },
+          config:   { responseMimeType: 'application/json' },
         });
-
-        if (!aiRes.text) {
-          clearTimeout(timeoutId);
-          return res.status(502).json({ error: 'O Gemini retornou uma resposta vazia.' });
-        }
-
+        if (!aiRes.text) { clearTimeout(timeoutId); return res.status(502).json({ error: 'Gemini retornou resposta vazia.' }); }
         scriptData = JSON.parse(aiRes.text);
       }
 
       clearTimeout(timeoutId);
 
-      // ── Validação estrutural do JSON retornado ─────────────────────────────
-      if (
-        typeof scriptData?.title !== 'string' ||
-        !Array.isArray(scriptData?.scenes) ||
-        scriptData.scenes.length === 0 ||
-        !Array.isArray(scriptData?.prompts) ||
-        scriptData.prompts.length === 0
-      ) {
-        logger.warn({ event: 'GENERATE_SCRIPT_INVALID_SHAPE', engine, scriptData }, 'LLM retornou JSON com estrutura incorreta');
-        return res.status(502).json({
-          error: 'A LLM retornou um JSON com estrutura inválida.',
-          raw: scriptData,
-        });
+      if (typeof scriptData?.title !== 'string' || !Array.isArray(scriptData?.scenes) || !Array.isArray(scriptData?.prompts)) {
+        return res.status(502).json({ error: 'LLM retornou JSON com estrutura inválida.', raw: scriptData });
       }
 
-      logger.info({ event: 'GENERATE_SCRIPT_SUCCESS', engine, uid: req.user?.uid, scenes: scriptData.scenes.length }, 'Roteiro gerado com sucesso');
+      logger.info({ event: 'GENERATE_SCRIPT_SUCCESS', engine, scenes: scriptData.scenes.length });
       return res.status(200).json(scriptData);
 
     } catch (err: any) {
       clearTimeout(timeoutId);
-
-      if (err.name === 'AbortError') {
-        logger.warn({ event: 'GENERATE_SCRIPT_TIMEOUT', engine }, 'Timeout ao aguardar resposta da LLM');
-        return res.status(504).json({ error: 'Timeout: a LLM demorou mais de 30 segundos para responder.' });
-      }
-
-      if (err instanceof SyntaxError) {
-        logger.warn({ event: 'GENERATE_SCRIPT_PARSE_ERROR', engine, message: err.message }, 'LLM retornou conteúdo não-JSON');
-        return res.status(502).json({ error: 'A LLM retornou conteúdo que não é JSON válido.' });
-      }
-
-      logger.error({ event: 'GENERATE_SCRIPT_INTERNAL_ERROR', engine, message: err.message }, 'Erro interno ao gerar roteiro');
+      if (err.name === 'AbortError')   return res.status(504).json({ error: 'Timeout: LLM demorou mais de 30 segundos.' });
+      if (err instanceof SyntaxError) return res.status(502).json({ error: 'LLM retornou conteúdo não-JSON.' });
+      logger.error({ event: 'GENERATE_SCRIPT_ERROR', err: err.message });
       return res.status(500).json({ error: 'Erro interno ao gerar roteiro.', details: err.message });
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+  // ── Inicia sessões e crons ─────────────────────────────────────────────────
+  restoreSessions();
+  initializeCronJob();
+
+  // ── Vite (dev) / Static (prod) ────────────────────────────────────────────
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Socket.IO ready on ws://localhost:${PORT}`);
+  // ── Listen ─────────────────────────────────────────────────────────────────
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    logger.info({ event: 'SERVER_START', port: PORT }, `Servidor rodando em http://localhost:${PORT}`);
+    logger.info({ event: 'SOCKET_IO_READY', port: PORT }, `Socket.IO pronto em ws://localhost:${PORT}`);
   });
 }
 
-startServer();
+// ── Boot ──────────────────────────────────────────────────────────────────────
+startServer().catch(err => {
+  logger.error({ event: 'SERVER_BOOT_FAILED', err: err.message }, 'Falha crítica ao iniciar servidor');
+  process.exit(1);
+});
