@@ -5,6 +5,13 @@ export interface LeadColhido {
   url: string;
   dominio: string;
   nicho: string;
+  // Campos CRM computados no momento do fetch (exibição no painel)
+  name?: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  source?: string;
+  value?: number;
   temMetaPixel: boolean;
   temGoogleAds: boolean;
   whatsapp: string | null;

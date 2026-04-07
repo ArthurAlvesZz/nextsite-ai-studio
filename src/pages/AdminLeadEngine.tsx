@@ -171,7 +171,7 @@ export default function AdminLeadEngine() {
           value: data.value || 0,
           lastContact: data.lastContact || data.createdAt || new Date().toISOString(),
           score: data.score || 0
-        } as LeadColhido;
+        } as unknown as LeadColhido;
       });
       setLeads(leadsData);
     } catch (err) {
