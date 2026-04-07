@@ -52,19 +52,25 @@ function initAdmin(): void {
   const credEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
   try {
-    if (credEnv) {
-      // Variável de ambiente aponta para o arquivo
+    // 1. FIREBASE_SERVICE_ACCOUNT — JSON string (Vercel / ambientes cloud sem filesystem)
+    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (serviceAccountJson) {
+      const serviceAccount = JSON.parse(serviceAccountJson);
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount), projectId });
+      logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'env_json' }, 'Firebase Admin iniciado via FIREBASE_SERVICE_ACCOUNT (JSON env var)');
+    } else if (credEnv) {
+      // 2. GOOGLE_APPLICATION_CREDENTIALS — caminho para arquivo (dev local / GCP)
       const cred = admin.credential.cert(credEnv);
       admin.initializeApp({ credential: cred, projectId });
       logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'env_cred' }, 'Firebase Admin iniciado via GOOGLE_APPLICATION_CREDENTIALS');
     } else if (fs.existsSync(serviceAccountPath)) {
-      // service-account.json na raiz
+      // 3. service-account.json na raiz (dev local)
       const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
       const cred = admin.credential.cert(serviceAccount);
       admin.initializeApp({ credential: cred, projectId });
       logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'service_account_file' }, 'Firebase Admin iniciado via service-account.json');
     } else {
-      // Fallback: identidade padrão (GCP / Cloud Run)
+      // 4. Fallback: identidade padrão (GCP / Cloud Run com ADC configurado)
       admin.initializeApp({ projectId });
       logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'default_credentials' }, 'Firebase Admin iniciado com credenciais padrão (ADC)');
     }
