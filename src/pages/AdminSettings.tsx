@@ -28,6 +28,14 @@ export default function AdminSettings() {
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
 
+  // Notification State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info'; id: number } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type, id: Date.now() });
+    setTimeout(() => setToast(null), 5000);
+  };
+
   // Local state for goals to allow "Save" button
   const [localGoals, setLocalGoals] = useState(goalSettings);
   const [localTeamGoals, setLocalTeamGoals] = useState<{ [key: string]: { sales?: number; videos?: number } }>({});
@@ -89,33 +97,42 @@ export default function AdminSettings() {
           password: formData.password
         };
         // Update auth password if changed
-        if (formData.password !== editingMember.password) {
-          try {
-            const user = auth.currentUser;
-            if (user && user.uid === editingMember.userId) {
-              await updatePassword(user, formData.password);
-            }
-          } catch (error: any) {
-            console.error("Error updating password:", error);
-            if (error.code === 'auth/requires-recent-login') {
-              alert("Por motivos de segurança, você precisa fazer login novamente para alterar sua senha.");
-              return;
-            }
-            alert("Erro ao atualizar senha no Firebase Auth.");
+        try {
+          const user = auth.currentUser;
+          if (user && user.uid === editingMember.userId) {
+            await updatePassword(user, formData.password);
+          }
+        } catch (error: any) {
+          console.error("Error updating password:", error);
+          if (error.code === 'auth/requires-recent-login') {
+            showToast("Sua sessão expirou por segurança. Faça login novamente para alterar a senha.", 'error');
             return;
           }
+          showToast("Erro ao atualizar senha no servidor de autenticação.", 'error');
+          return;
         }
         
         updateMember(editingMember.id, updates);
+        showToast("Seu perfil foi atualizado com sucesso!", 'success');
         handleCloseModal();
         return;
       }
       updateMember(editingMember.id, formData);
+      showToast("Membro da equipe atualizado com sucesso!", 'success');
     } else {
-      if (formData.login === '15599873676') {
-        alert("Este ID de acesso é reservado para o proprietário.");
+      // Strong Sanitization for Login (Lucas S -> lucass)
+      const sanitizedLogin = formData.login.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9.-]/g, '');
+      
+      if (!sanitizedLogin) {
+        showToast("Login inválido. Use apenas letras e números.", 'error');
         return;
       }
+
+      if (sanitizedLogin === '15599873676') {
+        showToast("Este ID de acesso é reservado para o proprietário.", 'error');
+        return;
+      }
+      
       try {
         const token = await auth.currentUser?.getIdToken();
         if (!token) throw new Error("Acesso negado: Seu login de Admin expirou.");
@@ -128,7 +145,7 @@ export default function AdminSettings() {
           },
           body: JSON.stringify({
             name: formData.name,
-            login: formData.login,
+            login: sanitizedLogin, // Using sanitized login
             password: formData.password,
             role: formData.role.toLowerCase()
           })
@@ -137,13 +154,18 @@ export default function AdminSettings() {
         const result = await response.json();
 
         if (!response.ok) {
+          // Translate common Firebase errors from API
+          if (result.error?.includes('email-already-in-use')) {
+            throw new Error("Este login/id já está em uso por outro membro.");
+          }
           throw new Error(result.error || "Erro ao processar criação no servidor.");
         }
 
-        // A lista será atualizada automaticamente pelo onSnapshot no useEmployees()
+        showToast("Acesso criado com sucesso! E-mail de alquimia gerado.", 'success');
+        // List will be updated automatically by onSnapshot in useEmployees()
       } catch (e: any) {
         console.error("Erro na criação do acesso:", e);
-        alert("Erro ao criar acesso: " + (e.message || 'Erro inesperado'));
+        showToast(e.message || 'Erro inesperado ao criar acesso.', 'error');
         return;
       }
     }
@@ -153,13 +175,14 @@ export default function AdminSettings() {
   const handleDeleteMember = (id: string) => {
     const memberToDelete = teamMembers.find(m => m.id === id);
     if (memberToDelete?.isOwner) {
-      alert("O proprietário não pode ser removido.");
+      showToast("O proprietário não pode ser removido.", 'error');
       handleCloseModal();
       return;
     }
     
     if (isDeleting) {
       deleteMember(id);
+      showToast("Membro removido da equipe.", 'info');
       handleCloseModal();
     } else {
       setIsDeleting(true);
@@ -298,6 +321,27 @@ export default function AdminSettings() {
 
       <SEO title="Configurações" />
       <AdminSidebar activePage="settings" isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+
+      {/* Neon Toast Notification */}
+      {toast && (
+        <div 
+          className={`fixed top-28 right-10 z-[100] flex items-center gap-4 px-6 py-4 rounded-2xl border backdrop-blur-2xl transition-all duration-500 animate-in fade-in slide-in-from-right-10 ${
+            toast.type === 'success' 
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.2)]' 
+              : toast.type === 'error'
+                ? 'bg-red-500/10 border-red-500/30 text-red-400 shadow-[0_0_20px_rgba(248,113,113,0.2)]'
+                : 'bg-secondary/10 border-secondary/30 text-secondary shadow-[0_0_20px_rgba(203,123,255,0.2)]'
+          }`}
+        >
+          <span className="material-symbols-outlined">
+            {toast.type === 'success' ? 'check_circle' : toast.type === 'error' ? 'error' : 'info'}
+          </span>
+          <p className="font-headline font-bold text-xs uppercase tracking-widest">{toast.message}</p>
+          <button onClick={() => setToast(null)} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">
+            <span className="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="md:ml-64 w-full flex-1 min-h-screen relative">

@@ -1,3 +1,4 @@
+
 // Auditoria de usuários: Firebase Auth vs Firestore employees
 // Identifica e pode deletar usuários "fantasmas"
 // Uso: node scripts/audit-auth-users.mjs [--delete-ghost <uid>]

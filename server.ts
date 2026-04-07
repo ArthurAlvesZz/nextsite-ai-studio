@@ -1371,13 +1371,13 @@ async function startServer() {
       return res.status(400).json({ error: "A senha deve ter pelo menos 6 caracteres." });
     }
 
-    const sanitizedLogin = login.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    const sanitizedLogin = login.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9.-]/g, '');
     if (!sanitizedLogin) {
-      return res.status(400).json({ error: "Login inválido. Use apenas letras, números, ponto, hífen ou underscore." });
+      return res.status(400).json({ error: "Login inválido. Use apenas letras, números, ponto ou hífen." });
     }
 
-    const email = `${sanitizedLogin}@nextcreatives.co`;
-    const memberRole = (role === 'editor' || role === 'admin') ? role : 'editor';
+    const email = `${sanitizedLogin}@nextcreatives.internal`;
+    const memberRole = (role === 'editor' || role === 'admin' || role === 'vendedor') ? role : 'editor';
 
     let createdUid: string | null = null;
 
