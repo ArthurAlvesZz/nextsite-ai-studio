@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SEO from '../components/SEO';
 import { motion, AnimatePresence } from 'motion/react';
-import { io, Socket } from 'socket.io-client';
 import { auth } from '../firebase';
 import { 
   Search, 
@@ -70,7 +69,6 @@ const AdminNextZap: React.FC = () => {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [userInfo, setUserInfo] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const socketRef = useRef<Socket | null>(null);
   const selectedChatRef = useRef<Chat | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -193,74 +191,9 @@ const AdminNextZap: React.FC = () => {
   }, [selectedChat]);
 
   useEffect(() => {
-    let socket: Socket;
-
-    const connectSocket = async () => {
-      const token = await auth.currentUser?.getIdToken();
-      if (!token) return;
-
-      socket = io({ auth: { token } });
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        console.log('[NextZap] Socket connected:', socket.id);
-      });
-
-      socket.on('whatsapp:status', (data: { status: any; qr: string | null; user: any }) => {
-        setWhatsappStatus(data.status);
-        setQrCode(data.qr);
-        setUserInfo(data.user);
-        if (data.status === 'ready') {
-          stopPolling();
-          fetchChats();
-        }
-      });
-
-      socket.on('whatsapp:message', (msg: any) => {
-        const jid = msg.key?.remoteJid;
-        if (!jid) return;
-
-        let type: Message['type'] = 'text';
-        let text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-        if (msg.message?.imageMessage) { type = 'image'; text = msg.message.imageMessage.url || 'Imagem'; }
-        else if (msg.message?.videoMessage) { type = 'video'; text = msg.message.videoMessage.url || 'Vídeo'; }
-        else if (msg.message?.audioMessage) { type = 'audio'; text = 'Mensagem de áudio'; }
-        else if (msg.message?.documentMessage) { type = 'document'; text = msg.message.documentMessage.fileName || 'Documento'; }
-
-        const newMsg: Message = {
-          id: msg.key.id,
-          text,
-          type,
-          sender: msg.key.fromMe ? 'me' : 'them',
-          timestamp: msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now(),
-          status: 'sent'
-        };
-
-        if (selectedChatRef.current?.id === jid) {
-          setMessages(prev => {
-            if (prev.some(m => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
-        } else {
-          setChats(prev => prev.map(c =>
-            c.id === jid
-              ? { ...c, lastMessage: text, timestamp: newMsg.timestamp, unreadCount: (c.unreadCount || 0) + 1 }
-              : c
-          ));
-        }
-      });
-
-      socket.on('disconnect', () => {
-        console.log('[NextZap] Socket disconnected');
-      });
-    };
-
     fetchStatus();
-    connectSocket();
 
     return () => {
-      socket?.disconnect();
-      socketRef.current = null;
       stopPolling();
     };
   }, []);
