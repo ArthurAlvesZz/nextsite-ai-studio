@@ -10,16 +10,9 @@ import {
   Play, 
   ArrowRight, 
   ArrowUpRight,
-  Heart,
-  MessageCircle,
-  Send,
   ChevronUp,
   ChevronDown,
-  Camera,
-  Music,
-  MoreHorizontal,
   Cpu,
-  Sparkles
 } from 'lucide-react';
 import { useLenis } from '@studio-freight/react-lenis';
 import logo from '../assets/logo.png';

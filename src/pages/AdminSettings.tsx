@@ -9,7 +9,6 @@ import { useAgencySettings, PortfolioCase, WorkflowStep } from '../hooks/useAgen
 import { useGoalSettings } from '../hooks/useGoalSettings';
 import { auth, db } from '../firebase';
 import { updatePassword } from 'firebase/auth';
-import { doc } from 'firebase/firestore';
 
 export default function AdminSettings() {
   const { teamMembers, addMember, updateMember, deleteMember } = useEmployees();

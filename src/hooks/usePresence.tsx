@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { useLocation } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, setDoc, deleteDoc, collection, onSnapshot, query } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 interface PresenceContextType {
   onlineUsers: number;
@@ -29,7 +28,7 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           pathname: window.location.pathname,
         }, { merge: true });
       } catch (e) {
-        handleFirestoreError(e, OperationType.WRITE, `presence/${sessionId}`);
+        console.error('[Presence] Erro ao atualizar presença no Firestore:', e);
       }
     };
     
@@ -59,7 +58,7 @@ export const PresenceProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setOnlineUsers(count);
       setOnlineAdminUsers(adminCount);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'presence');
+      console.error('[Presence] Erro no listener de presença:', error);
     });
 
     return () => {

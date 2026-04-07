@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { auth } from '../firebase';
 
 type WhatsappStatus = 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready';
 
@@ -18,6 +19,11 @@ interface WhatsappContextType {
 const WhatsappContext = createContext<WhatsappContextType | undefined>(undefined);
 
 export function WhatsappProvider({ children }: { children: ReactNode }) {
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    const token = await auth.currentUser?.getIdToken().catch(() => null);
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const [whatsappStatus, setWhatsappStatus] = useState<WhatsappStatus>('disconnected');
   const [whatsappQR, setWhatsappQR] = useState<string | null>(null);
   const [whatsappUser, setWhatsappUser] = useState<any>(null);
@@ -30,7 +36,8 @@ export function WhatsappProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const res = await fetch('/api/whatsapp/status');
+        const headers = await getAuthHeaders();
+        const res = await fetch('/api/whatsapp/status', { headers });
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         const text = await res.text();
         try {
@@ -55,7 +62,8 @@ export function WhatsappProvider({ children }: { children: ReactNode }) {
     setShowQRModal(true);
     setWhatsappStatus('connecting');
     try {
-      const res = await fetch('/api/whatsapp/connect', { method: 'POST' });
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/whatsapp/connect', { method: 'POST', headers });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const text = await res.text();
       try {
@@ -77,9 +85,10 @@ export function WhatsappProvider({ children }: { children: ReactNode }) {
     }
     setIsRequestingCode(true);
     try {
+      const authHeaders = await getAuthHeaders();
       const res = await fetch('/api/whatsapp/pair', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ phone: phoneNumber })
       });
       if (!res.ok) {
@@ -99,7 +108,8 @@ export function WhatsappProvider({ children }: { children: ReactNode }) {
   const handleLogoutWhatsApp = async () => {
     if (!confirm("Deseja realmente desconectar o WhatsApp?")) return;
     try {
-      await fetch('/api/whatsapp/logout', { method: 'POST' });
+      const logoutHeaders = await getAuthHeaders();
+      await fetch('/api/whatsapp/logout', { method: 'POST', headers: logoutHeaders });
       setWhatsappStatus('disconnected');
       setWhatsappQR(null);
       setWhatsappUser(null);

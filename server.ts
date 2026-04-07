@@ -15,6 +15,7 @@ import pino from "pino";
 import nodemailer from "nodemailer";
 import { runVideoPipeline, initializeCronJob } from "./services/automation/orchestratorService.js";
 import { useFirestoreAuthState } from "./services/whatsapp/firestoreAuthState.js";
+import { spawn } from "child_process";
 
 dotenv.config();
 
@@ -776,18 +777,28 @@ async function startServer() {
   });
 
   app.get("/api/whatsapp/messages/:jid", requireAdmin, async (req: any, res) => {
-    const uid = req.user.uid;
-    const session = sessions.get(uid);
-    const { jid } = req.params;
-    if (!session || !session.socket || session.status !== 'ready') {
-      return res.status(400).json({ error: "WhatsApp not connected" });
+    try {
+      const uid = req.user.uid;
+      const session = sessions.get(uid);
+      const { jid } = req.params;
+      if (!session || !session.socket || session.status !== 'ready') {
+        return res.status(400).json({ error: "WhatsApp not connected" });
+      }
+      const messages = await store.loadMessages(jid, 50, undefined);
+      res.json(messages);
+    } catch (error) {
+      console.error("Erro ao buscar mensagens WhatsApp:", error);
+      res.status(500).json({ error: "Falha ao buscar mensagens." });
     }
-    const messages = await store.loadMessages(jid, 50, undefined);
-    res.json(messages);
   });
 
   app.get("/api/whatsapp/contacts", requireAdmin, (req, res) => {
-    res.json(Object.values(store.contacts));
+    try {
+      res.json(Object.values(store.contacts));
+    } catch (error) {
+      console.error("Erro ao buscar contatos WhatsApp:", error);
+      res.status(500).json({ error: "Falha ao buscar contatos." });
+    }
   });
 
   app.get("/api/whatsapp/status", requireAdmin, (req: any, res) => {
@@ -1227,7 +1238,6 @@ async function startServer() {
 
       fs.writeFileSync(inputFilename, urls.join('\n'));
 
-      const { spawn } = require('child_process');
       const pythonProcess = spawn('python', ['shopify_scraper.py', inputFilename, '--output', outputFilename], { cwd: scraperDir });
 
       let processedCount = 0;

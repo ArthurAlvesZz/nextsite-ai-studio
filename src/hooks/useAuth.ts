@@ -105,7 +105,7 @@ export function useAuth() {
       }
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+      console.error('[Auth] Erro no listener de perfil Firestore:', error);
       setLoading(false);
     });
 

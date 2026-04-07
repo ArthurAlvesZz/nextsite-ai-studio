@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from '../firebase';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Filter, Download, MoreHorizontal, ArrowUpRight, ChevronRight, Zap, Users, Target, BarChart3, MessageSquare, Phone, Mail, Globe, MapPin, Calendar, Clock, CheckCircle2, AlertCircle, Loader2, Settings, TrendingUp, PieChart as PieChartIcon, Briefcase, Star, ShoppingBag, Megaphone, Send, Plus, Activity, Cpu, Zap as Bolt, X, Info, ChevronDown, MessageCircle } from 'lucide-react';
+import { Search, Filter, Download, MoreHorizontal, ArrowUpRight, ChevronRight, Zap, Users, Target, BarChart3, MessageSquare, Phone, Mail, Globe, MapPin, Calendar, Clock, CheckCircle2, AlertCircle, Loader2, Settings, TrendingUp, PieChart as PieChartIcon, Briefcase, Star, ShoppingBag, Megaphone, Send, Plus, Activity, Cpu, X, Info, ChevronDown, MessageCircle, Bolt } from 'lucide-react';
 import { LeadColhido } from '../types/lead';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { ScraperStats } from '../services/scrapersService';
@@ -1621,6 +1621,7 @@ export default function AdminLeadEngine() {
             </div>
           )}
         </AnimatePresence>
+        </div>
       </main>
     </div>
   );
