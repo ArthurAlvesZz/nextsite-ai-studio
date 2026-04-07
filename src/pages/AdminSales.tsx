@@ -6,6 +6,43 @@ import { useCRMLeads, CRMLead } from '../hooks/useCRMLeads';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
 
+// Helper to format lead date outside component to avoid re-creation
+const formatLeadDate = (createdAt?: string) => {
+  if (createdAt) {
+    try {
+      return new Date(createdAt).toLocaleString('pt-BR', { 
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      }).replace(',', ' às');
+    } catch (e) {
+      return 'Data Inválida';
+    }
+  }
+  return 'Data N/A';
+};
+
+const statusColors = {
+  'Novo': 'text-blue-400 bg-blue-400/10 border-blue-400/20',
+  'Contato Feito': 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20',
+  'Em Negociação': 'text-purple-400 bg-purple-400/10 border-purple-400/20',
+  'Convertido': 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
+};
+
+const LeadRow = React.memo(({ lead }: { lead: CRMLead }) => (
+  <tr className="hover:bg-white/[0.02] transition-colors group">
+    <td className="px-8 py-5 text-sm font-bold text-white">{lead.businessName}</td>
+    <td className="px-8 py-5 text-sm text-white/60">{lead.phone}</td>
+    <td className="px-8 py-5 text-sm text-white/60">{lead.leadSource}</td>
+    <td className="px-8 py-5">
+      <span className={`px-3 py-1.5 border rounded-full text-[10px] font-bold uppercase tracking-widest ${statusColors[lead.status as keyof typeof statusColors] || 'text-white/60'}`}>
+        {lead.status}
+      </span>
+    </td>
+    <td className="px-8 py-5 text-sm font-mono text-white/40">{formatLeadDate(lead.createdAt)}</td>
+  </tr>
+));
+
 export default function AdminSales() {
   const { leads, addLead } = useCRMLeads();
   
@@ -27,7 +64,7 @@ export default function AdminSales() {
     );
   }, [leads, searchQuery]);
 
-  const handleAddLead = async (e: React.FormEvent) => {
+  const handleAddLead = React.useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!businessName || !phone) {
       alert('Por favor, preencha nome da empresa e WhatsApp.');
@@ -51,20 +88,9 @@ export default function AdminSales() {
     } catch (error) {
       alert('Erro ao adicionar lead.');
     }
-  };
+  }, [addLead, businessName, phone, leadSource, status]);
 
-  const formatLeadDate = (createdAt?: string) => {
-    if (createdAt) {
-      return new Date(createdAt).toLocaleString('pt-BR', { 
-        timeZone: 'America/Sao_Paulo',
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      }).replace(',', ' às');
-    }
-    return 'Data N/A';
-  };
-
-  const handleExportCSV = () => {
+  const handleExportCSV = React.useCallback(() => {
     if (filteredLeads.length === 0) {
       alert('Não há dados para exportar.');
       return;
@@ -93,18 +119,14 @@ export default function AdminSales() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
+  }, [filteredLeads]);
 
-  const statusColors = {
-    'Novo': 'text-blue-400 bg-blue-400/10 border-blue-400/20',
-    'Contato Feito': 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20',
-    'Em Negociação': 'text-purple-400 bg-purple-400/10 border-purple-400/20',
-    'Convertido': 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
-  };
-
-  const totalLeads = leads.length;
-  const convertedLeads = leads.filter(l => l.status === 'Convertido').length;
-  const conversionRate = totalLeads ? Math.round((convertedLeads / totalLeads) * 100) : 0;
+  const { totalLeads, convertedLeads, conversionRate } = useMemo(() => {
+    const total = leads.length;
+    const converted = leads.filter(l => l.status === 'Convertido').length;
+    const rate = total ? Math.round((converted / total) * 100) : 0;
+    return { totalLeads: total, convertedLeads: converted, conversionRate: rate };
+  }, [leads]);
 
   return (
     <div className="font-headline text-on-background min-h-screen flex bg-[#050505] overflow-hidden selection:bg-primary/30">
@@ -250,17 +272,7 @@ export default function AdminSales() {
                 <tbody className="divide-y divide-white/5">
                   {filteredLeads.length > 0 ? (
                     filteredLeads.map((lead) => (
-                      <tr key={lead.id} className="hover:bg-white/[0.02] transition-colors group">
-                        <td className="px-8 py-5 text-sm font-bold text-white">{lead.businessName}</td>
-                        <td className="px-8 py-5 text-sm text-white/60">{lead.phone}</td>
-                        <td className="px-8 py-5 text-sm text-white/60">{lead.leadSource}</td>
-                        <td className="px-8 py-5">
-                          <span className={`px-3 py-1.5 border rounded-full text-[10px] font-bold uppercase tracking-widest ${statusColors[lead.status as keyof typeof statusColors] || 'text-white/60'}`}>
-                            {lead.status}
-                          </span>
-                        </td>
-                        <td className="px-8 py-5 text-sm font-mono text-white/40">{formatLeadDate(lead.createdAt)}</td>
-                      </tr>
+                      <LeadRow key={lead.id} lead={lead} />
                     ))
                   ) : (
                     <tr>

@@ -1461,6 +1461,181 @@ async function startServer() {
     }
   });
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // ADMIN — Gerador de Roteiro / Prompt (LLM)
+  //
+  // Recebe um briefing e uma engine ('groq' | 'gemini') e retorna um JSON
+  // estruturado com título, cenas e prompts estilo Midjourney/Runway.
+  //
+  // Segurança: requireOwner via middleware global (app.use '/api/admin')
+  //            + declarado explicitamente abaixo para clareza RBAC.
+  // ════════════════════════════════════════════════════════════════════════════
+  const SCRIPT_SYSTEM_PROMPT = `You are an elite video scriptwriter and AI prompt engineer specializing in ultra-high-conversion video content for digital marketing agencies.
+
+YOUR ONLY OUTPUT IS A SINGLE RAW JSON OBJECT.
+- DO NOT write markdown. DO NOT use \`\`\`json fences. DO NOT add explanations.
+- DO NOT add any text before or after the JSON.
+- The JSON must be valid and parseable by JSON.parse() with zero preprocessing.
+- Any deviation from pure JSON will cause a critical system failure.
+
+OUTPUT SCHEMA (follow it exactly — no extra or missing keys):
+{
+  "title": "string — creative, punchy video title (max 12 words)",
+  "scenes": [
+    {
+      "id": number,
+      "setting": "string — screenplay format: INT./EXT. LOCATION - TIME (ex: EXT. BUSY MARKET - GOLDEN HOUR)",
+      "title": "string — evocative scene name (3-6 words)",
+      "description": "string — cinematic narrative description: camera movement, visual details, emotional beat, color palette, 3-5 sentences",
+      "tags": ["array", "of", "visual", "style", "tags", "e.g.", "4K", "Cinematic", "Slow-motion"]
+    }
+  ],
+  "prompts": [
+    {
+      "sceneId": number,
+      "prompt_text": "string — ultra-detailed Midjourney/Runway prompt starting with /imagine prompt: — include camera lens (e.g. 35mm f/1.4), lighting style, color grading (e.g. Kodak Vision3 LUT), motion direction, mood, art direction references, aspect ratio flag (--ar 16:9), version flag (--v 6.1)"
+    }
+  ]
+}
+
+RULES FOR CONTENT:
+- Generate between 3 and 6 scenes per script.
+- Each scene must have exactly one matching prompt (sceneId links them).
+- Descriptions must be sensory and emotionally charged — make the viewer feel urgency, desire, or aspiration.
+- Prompts must be photorealistic and cinematographic. Include technical details that a professional DP would use.
+- The overall narrative arc must follow: Hook → Problem/Desire → Solution/Proof → CTA.
+- Write for maximum retention and conversion. Every word must earn its place.
+- Language of all text fields: Brazilian Portuguese (except technical tags and prompt_text which stay in English).`;
+
+  app.post("/api/admin/generate-script", requireOwner, async (req: any, res: any) => {
+    const { briefing, engine = 'groq' } = req.body ?? {};
+
+    if (!briefing || typeof briefing !== 'string' || briefing.trim().length < 10) {
+      return res.status(400).json({
+        error: 'O campo briefing é obrigatório e deve ter no mínimo 10 caracteres.',
+      });
+    }
+
+    const validEngines = ['groq', 'gemini'];
+    if (!validEngines.includes(engine)) {
+      return res.status(400).json({ error: `Engine inválida. Use: ${validEngines.join(' | ')}.` });
+    }
+
+    const userMessage = `BRIEFING DO CLIENTE:\n${briefing.trim()}\n\nGere o roteiro e os prompts agora. Retorne APENAS o JSON.`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+
+    try {
+      let scriptData: any;
+
+      // ── Groq (llama-3.3-70b-versatile) ────────────────────────────────────
+      if (engine === 'groq') {
+        const groqKey = process.env.GROQ_API_KEY;
+        if (!groqKey) {
+          clearTimeout(timeoutId);
+          return res.status(500).json({ error: 'GROQ_API_KEY não configurada no servidor.' });
+        }
+
+        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${groqKey}`,
+          },
+          body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              { role: 'system', content: SCRIPT_SYSTEM_PROMPT },
+              { role: 'user',   content: userMessage },
+            ],
+            temperature: 0.75,
+            max_tokens: 4096,
+            response_format: { type: 'json_object' },
+          }),
+          signal: controller.signal,
+        });
+
+        if (!groqRes.ok) {
+          const errBody = await groqRes.json().catch(() => ({}));
+          clearTimeout(timeoutId);
+          logger.error({ event: 'GENERATE_SCRIPT_GROQ_ERROR', status: groqRes.status, errBody }, 'Groq API error');
+          return res.status(502).json({ error: 'Erro na API da Groq.', details: errBody });
+        }
+
+        const groqData = await groqRes.json();
+        const rawContent: string | undefined = groqData.choices?.[0]?.message?.content;
+
+        if (!rawContent) {
+          clearTimeout(timeoutId);
+          return res.status(502).json({ error: 'A Groq retornou uma resposta vazia.' });
+        }
+
+        scriptData = JSON.parse(rawContent);
+
+      // ── Gemini ─────────────────────────────────────────────────────────────
+      } else {
+        const geminiKey = process.env.GEMINI_API_KEY;
+        if (!geminiKey) {
+          clearTimeout(timeoutId);
+          return res.status(500).json({ error: 'GEMINI_API_KEY não configurada no servidor.' });
+        }
+
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey: geminiKey });
+
+        const aiRes = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `${SCRIPT_SYSTEM_PROMPT}\n\n${userMessage}`,
+          config: { responseMimeType: 'application/json' },
+        });
+
+        if (!aiRes.text) {
+          clearTimeout(timeoutId);
+          return res.status(502).json({ error: 'O Gemini retornou uma resposta vazia.' });
+        }
+
+        scriptData = JSON.parse(aiRes.text);
+      }
+
+      clearTimeout(timeoutId);
+
+      // ── Validação estrutural do JSON retornado ─────────────────────────────
+      if (
+        typeof scriptData?.title !== 'string' ||
+        !Array.isArray(scriptData?.scenes) ||
+        scriptData.scenes.length === 0 ||
+        !Array.isArray(scriptData?.prompts) ||
+        scriptData.prompts.length === 0
+      ) {
+        logger.warn({ event: 'GENERATE_SCRIPT_INVALID_SHAPE', engine, scriptData }, 'LLM retornou JSON com estrutura incorreta');
+        return res.status(502).json({
+          error: 'A LLM retornou um JSON com estrutura inválida.',
+          raw: scriptData,
+        });
+      }
+
+      logger.info({ event: 'GENERATE_SCRIPT_SUCCESS', engine, uid: req.user?.uid, scenes: scriptData.scenes.length }, 'Roteiro gerado com sucesso');
+      return res.status(200).json(scriptData);
+
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+
+      if (err.name === 'AbortError') {
+        logger.warn({ event: 'GENERATE_SCRIPT_TIMEOUT', engine }, 'Timeout ao aguardar resposta da LLM');
+        return res.status(504).json({ error: 'Timeout: a LLM demorou mais de 30 segundos para responder.' });
+      }
+
+      if (err instanceof SyntaxError) {
+        logger.warn({ event: 'GENERATE_SCRIPT_PARSE_ERROR', engine, message: err.message }, 'LLM retornou conteúdo não-JSON');
+        return res.status(502).json({ error: 'A LLM retornou conteúdo que não é JSON válido.' });
+      }
+
+      logger.error({ event: 'GENERATE_SCRIPT_INTERNAL_ERROR', engine, message: err.message }, 'Erro interno ao gerar roteiro');
+      return res.status(500).json({ error: 'Erro interno ao gerar roteiro.', details: err.message });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

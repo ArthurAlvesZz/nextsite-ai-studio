@@ -34,7 +34,6 @@ import {
   QrCode
 } from 'lucide-react';
 import AdminSidebar from '../components/AdminSidebar';
-import { usePageTitle } from '../hooks/usePageTitle';
 
 interface Chat {
   id: string;
@@ -59,7 +58,6 @@ interface Message {
 }
 
 const AdminNextZap: React.FC = () => {
-  usePageTitle('NextZap CRM');
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
