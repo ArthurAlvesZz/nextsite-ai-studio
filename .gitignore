@@ -9,3 +9,4 @@ coverage/
 
 # Chaves Privadas do Firebase (Admin SDK)
 service-account.json
+.vercel

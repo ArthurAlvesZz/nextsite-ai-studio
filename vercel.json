@@ -9,8 +9,8 @@
   },
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/index"
+      "source": "/api/(.*)",
+      "destination": "/api/index.ts"
     },
     {
       "source": "/((?!api/|.*\\.(?:ico|png|jpg|jpeg|svg|js|css|gif|mp4|webm|woff2?)).*)",

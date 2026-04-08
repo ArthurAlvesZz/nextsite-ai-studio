@@ -2,13 +2,18 @@ import { app, startServer } from '../server.js';
 
 /**
  * Vercel Serverless Function entry point.
- * 
- * This file bridges the full Express application to Vercel's serverless environment.
+ * Ensures that the Express app is configured with all routes before handling requests.
  */
 
-// Initialize routes and middlewares
-// We call it but don't await (top level await is complex in some configs)
-// Express registers routes synchronously once called.
-startServer();
+let isInitialized = false;
+const initPromise = (async () => {
+  if (!isInitialized) {
+    await startServer();
+    isInitialized = true;
+  }
+})();
 
-export default app;
+export default async (req: any, res: any) => {
+  await initPromise;
+  return app(req, res);
+};
