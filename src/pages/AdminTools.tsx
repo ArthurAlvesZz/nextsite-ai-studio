@@ -6,11 +6,9 @@ import { motion } from 'motion/react';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 
 export default function AdminTools() {
-  const { adminProfile, loading: authLoading } = useRequireAuth('owner');
+  const { adminProfile, loading: authLoading } = useRequireAuth();
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  // AdminTools restrito para Owners
 
   const manuals = [
     {

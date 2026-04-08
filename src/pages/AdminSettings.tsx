@@ -24,6 +24,7 @@ export default function AdminSettings() {
   const [formData, setFormData] = useState({ name: '', role: 'Editor', login: '', password: '' });
   const [activeTab, setActiveTab] = useState('perfil');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
 
@@ -83,11 +84,13 @@ export default function AdminSettings() {
     setIsModalOpen(false);
     setEditingMember(null);
     setIsDeleting(false);
+    setIsSaving(false);
   };
 
   const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setIsSaving(true);
+
     if (editingMember) {
       if (editingMember.isOwner) {
         // Only allow updating name and password for owner
@@ -105,9 +108,11 @@ export default function AdminSettings() {
           console.error("Error updating password:", error);
           if (error.code === 'auth/requires-recent-login') {
             showToast("Sua sessão expirou por segurança. Faça login novamente para alterar a senha.", 'error');
+            setIsSaving(false);
             return;
           }
           showToast("Erro ao atualizar senha no servidor de autenticação.", 'error');
+          setIsSaving(false);
           return;
         }
         
@@ -124,11 +129,13 @@ export default function AdminSettings() {
       
       if (!sanitizedLogin) {
         showToast("Login inválido. Use apenas letras e números.", 'error');
+        setIsSaving(false);
         return;
       }
 
       if (sanitizedLogin === '15599873676') {
         showToast("Este ID de acesso é reservado para o proprietário.", 'error');
+        setIsSaving(false);
         return;
       }
       
@@ -165,6 +172,7 @@ export default function AdminSettings() {
       } catch (e: any) {
         console.error("Erro na criação do acesso:", e);
         showToast(e.message || 'Erro inesperado ao criar acesso.', 'error');
+        setIsSaving(false);
         return;
       }
     }
@@ -842,11 +850,12 @@ export default function AdminSettings() {
                     {isDeleting ? 'Confirmar?' : 'Remover'}
                   </button>
                 )}
-                <button 
+                <button
                   type="submit"
-                  className={`${editingMember?.isOwner ? 'w-full' : 'flex-[2]'} bg-gradient-to-r from-secondary to-primary text-on-secondary py-3 rounded-xl font-headline font-bold text-xs uppercase tracking-widest transition-all active:scale-95 shadow-[0_0_20px_rgba(233,179,255,0.2)] hover:shadow-[0_0_30px_rgba(233,179,255,0.4)]`}
+                  disabled={isSaving}
+                  className={`${editingMember?.isOwner ? 'w-full' : 'flex-[2]'} bg-gradient-to-r from-secondary to-primary text-on-secondary py-3 rounded-xl font-headline font-bold text-xs uppercase tracking-widest transition-all active:scale-95 shadow-[0_0_20px_rgba(233,179,255,0.2)] hover:shadow-[0_0_30px_rgba(233,179,255,0.4)] disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100`}
                 >
-                  {editingMember ? 'Salvar Alterações' : 'Criar Acesso'}
+                  {isSaving ? 'Salvando...' : editingMember ? 'Salvar Alterações' : 'Criar Acesso'}
                 </button>
               </div>
             </form>
