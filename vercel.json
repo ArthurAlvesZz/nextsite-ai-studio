@@ -13,7 +13,7 @@
       "destination": "/api/index"
     },
     {
-      "source": "/:path*",
+      "source": "/((?!api/|.*\\.(?:ico|png|jpg|jpeg|svg|js|css|gif|mp4|webm|woff2?)).*)",
       "destination": "/index.html"
     }
   ],
