@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface AdminProfile {
@@ -65,15 +65,13 @@ export function useAuth() {
           // Ponto de partida: normaliza role para lowercase
           let resolvedRole = userData.role?.toLowerCase() || 'editor';
 
-          // Override com a role da coleção `employees` (gerenciada em Settings)
-          // Esta é considerada mais confiável que o documento `users`.
+          // Override com a role do documento `employees/{uid}` (lookup direto por ID).
+          // Não usar where('userId', ...) pois o campo userId pode estar incorreto
+          // (todos os employees criados pelo owner herdam o UID do owner como userId).
           try {
-            const employeeSnap = await getDocs(
-              query(collection(db, 'employees'), where('userId', '==', user.uid))
-            );
-            if (!employeeSnap.empty) {
-              const employeeData = employeeSnap.docs[0].data();
-              resolvedRole = employeeData.role?.toLowerCase() || resolvedRole;
+            const employeeDocSnap = await getDoc(doc(db, 'employees', user.uid));
+            if (employeeDocSnap.exists()) {
+              resolvedRole = employeeDocSnap.data().role?.toLowerCase() || resolvedRole;
             }
           } catch (e) {
             console.warn('[useAuth] Erro ao sincronizar role de employees:', e);

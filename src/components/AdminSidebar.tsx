@@ -16,11 +16,11 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
   const [showLogout, setShowLogout] = useState(false);
 
   /**
-   * isOwner: única fonte de verdade derivada do role.
+   * isOwner: verdadeiro somente se o perfil indicar owner em qualquer dos dois campos.
    * Enquanto loading=true, isOwner é false — nunca mostra Ajustes antes
    * de a autenticação estar completamente resolvida.
    */
-  const isOwner = !loading && adminProfile?.isOwner === true && adminProfile?.role === 'owner';
+  const isOwner = !loading && (adminProfile?.isOwner === true || adminProfile?.role === 'owner');
 
   const handleLogout = () => {
     navigate('/admin');
