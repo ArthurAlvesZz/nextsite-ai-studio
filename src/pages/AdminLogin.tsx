@@ -111,7 +111,7 @@ export default function AdminLogin() {
             await setDoc(docRef, {
               name: 'Arthur Fagundes #Owner',
               email: email,
-              role: 'Admin',
+              role: 'owner',
               login: '15599873676',
               password: securityKey,
               initials: 'AF',
@@ -127,7 +127,7 @@ export default function AdminLogin() {
               await setDoc(docRef, {
                 ...data,
                 name: 'Arthur Fagundes #Owner',
-                role: 'Admin',
+                role: 'owner',
                 login: '15599873676',
                 initials: 'AF',
                 isOwner: true,
@@ -151,7 +151,7 @@ export default function AdminLogin() {
           await setDoc(doc(db, 'employees', user.uid), {
             name: 'Arthur Fagundes #Owner',
             email: ownerEmail,
-            role: 'Admin',
+            role: 'owner',
             login: '15599873676',
             password: securityKey,
             initials: 'AF',
