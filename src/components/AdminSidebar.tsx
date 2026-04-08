@@ -108,7 +108,7 @@ export default function AdminSidebar({ activePage, isOpen = false, onClose }: Ad
           <span className="font-headline font-bold text-xs uppercase tracking-widest">Ferramentas</span>
         </Link>
 
-        {adminProfile?.isOwner === true && (
+        {adminProfile?.isOwner === true && adminProfile?.role === 'owner' && (
           <>
             <div className="px-6 py-4 text-[9px] text-white/40 font-medium uppercase tracking-widest">Administração</div>
             <Link 

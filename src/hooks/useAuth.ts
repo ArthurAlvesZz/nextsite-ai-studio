@@ -56,12 +56,15 @@ export function useAuth() {
           if (!employeeSnap.empty) {
             const employeeData = employeeSnap.docs[0].data();
             finalProfile.role = employeeData.role?.toLowerCase() || finalProfile.role;
-            finalProfile.isOwner = !!employeeData.isOwner;
           }
         } catch (e) {
           console.warn("[Auth] Error syncing role from employees:", e);
         }
-        
+
+        // isOwner is always derived from role — prevents stale/incorrect Firestore data
+        // from granting owner access to editors or vendors.
+        finalProfile.isOwner = finalProfile.role === 'owner';
+
         setAdminProfile(finalProfile);
       } else {
         // Fallback logic for new users

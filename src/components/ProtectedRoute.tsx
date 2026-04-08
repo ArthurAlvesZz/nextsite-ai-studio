@@ -29,8 +29,9 @@ export default function ProtectedRoute({ children, requireAdmin = true, requireO
     return <Navigate to="/admin" state={{ from: location }} replace />;
   }
 
-  // Rota exclusiva para owner: redireciona qualquer não-owner para o dashboard
-  if (requireOwner && adminProfile?.isOwner !== true) {
+  // Rota exclusiva para owner: isOwner deve ser true E role deve ser 'owner'
+  const isOwner = adminProfile?.isOwner === true && adminProfile?.role === 'owner';
+  if (requireOwner && !isOwner) {
     return <Navigate to="/admin/dashboard" replace />;
   }
 
