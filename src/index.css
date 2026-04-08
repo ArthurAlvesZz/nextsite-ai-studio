@@ -1,11 +1,30 @@
 
 @import "tailwindcss";
 
+/*
+  Fallback ajustado para Manrope (elimina FOUT visual no hero).
+  Cria uma fonte virtual "Manrope Fallback" baseada em Arial com métricas
+  calibradas para aproximar as proporções de Manrope — mesma técnica do next/font.
+  Quando Manrope carrega via Google Fonts (font-display: swap), o swap é quase
+  imperceptível porque o layout já está com dimensões equivalentes.
+*/
+@font-face {
+  font-family: "Manrope Fallback";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: local("Arial");
+  ascent-override: 103%;
+  descent-override: 26%;
+  line-gap-override: 0%;
+  size-adjust: 100%;
+}
+
 @theme {
-  --font-headline: "Manrope", sans-serif;
-  --font-body: "Inter", sans-serif;
-  --font-label: "Inter", sans-serif;
-  --font-serif: "Cormorant Garamond", serif;
+  --font-headline: "Manrope", "Manrope Fallback", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-label: "Inter", system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
 
   --color-primary: #adc6ff;
   --color-on-primary: #002e69;

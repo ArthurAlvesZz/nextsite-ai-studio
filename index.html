@@ -8,11 +8,16 @@
     <title>Next Creatives | Vídeos com IA para o seu Negócio</title>
     <meta name="description" content="Agência focada em produção de vídeos e conteúdo através de Inteligência Artificial para alavancar seu negócio." />
     
-    <!-- Preload fonts to fix FOUT -->
+    <!-- Fonts: preconnect + stylesheet bloqueante para eliminar FOUT -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;400;700;800&family=Inter:wght@100;300;400;500;600&family=Cormorant+Garamond:ital,wght@0,300;1,300&display=swap" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;400;700;800&family=Inter:wght@100;300;400;500;600&family=Cormorant+Garamond:ital,wght@0,300;1,300&display=swap" />
+    <!--
+      Carrega a stylesheet de fontes de forma síncrona (bloqueante) para garantir
+      que o @font-face com display=swap seja registrado antes do primeiro paint.
+      Separamos Manrope (crítica, headline/hero) do restante para priorização.
+    -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;400&family=Inter:wght@100;300;400;500;600&family=Cormorant+Garamond:ital,wght@0,300;1,300&display=swap" />
     
     <!-- Open Graph Data -->
     <meta property="og:title" content="Next Creatives | Vídeos com IA para o seu Negócio" />
