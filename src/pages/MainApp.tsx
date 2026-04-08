@@ -14,7 +14,7 @@ import {
   ChevronDown,
   Cpu,
 } from 'lucide-react';
-import { useLenis } from '@studio-freight/react-lenis';
+import Lenis from 'lenis';
 import logo from '../assets/logo.png';
 import SEO from '../components/SEO';
 
@@ -24,18 +24,18 @@ gsap.registerPlugin(ScrollTrigger, TextPlugin);
 export default function MainApp() {
   const { settings } = useAgencySettings();
   const [isReady, setIsReady] = useState(true);
-  const lenis = useLenis();
-
   useEffect(() => {
-    if (!lenis) return;
+    const lenis = new Lenis({ lerp: 0.1, duration: 1.5, smoothWheel: true, autoRaf: false });
     lenis.on('scroll', ScrollTrigger.update);
-    gsap.ticker.add((time) => lenis.raf(time * 1000));
+    const rafCb = (time: number) => lenis.raf(time * 1000);
+    gsap.ticker.add(rafCb);
     gsap.ticker.lagSmoothing(0);
     return () => {
       lenis.off('scroll', ScrollTrigger.update);
-      gsap.ticker.remove((time) => lenis.raf(time * 1000));
+      gsap.ticker.remove(rafCb);
+      lenis.destroy();
     };
-  }, [lenis]);
+  }, []);
 
   useEffect(() => {
     const bgConstruct = document.querySelector('#bg-construct');
