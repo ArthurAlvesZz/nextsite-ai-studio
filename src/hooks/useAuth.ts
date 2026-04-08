@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
 
 export interface AdminProfile {
@@ -18,11 +18,22 @@ export interface AdminProfile {
   isOwner?: boolean;
 }
 
-export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
-  const [adminProfile, setAdminProfile] = useState<AdminProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+/**
+ * Única fonte de verdade para isOwner.
+ * Deriva SOMENTE do campo `role` normalizado — ignora qualquer campo
+ * `isOwner` bruto do Firestore para evitar escalada de privilégio por
+ * dados incorretos.
+ */
+function deriveIsOwner(role?: string): boolean {
+  return role?.toLowerCase() === 'owner';
+}
 
+export function useAuth() {
+  const [user, setUser]               = useState<User | null>(null);
+  const [adminProfile, setAdminProfile] = useState<AdminProfile | null>(null);
+  const [loading, setLoading]         = useState(true);
+
+  // ── Listener de autenticação Firebase ──────────────────────────────────────
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -34,85 +45,116 @@ export function useAuth() {
     return () => unsubscribe();
   }, []);
 
+  // ── Listener de perfil Firestore ────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
 
-    // Listen to user profile in Firestore
+    // Previne updates assíncronos após desmonte do componente ou troca de user
+    let isMounted = true;
+
     const userDocRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userDocRef, async (docSnap) => {
-      let finalProfile: AdminProfile | null = null;
-      
-      if (docSnap.exists()) {
-        const userData = docSnap.data() as AdminProfile;
-        finalProfile = {
-          ...userData,
-          role: userData.role?.toLowerCase() || 'editor'
-        };
 
-        // Deep check: Ensure the role from the 'employees' collection 
-        // (managed in Settings) overrides the potentially stale 'users' doc role
-        try {
-          const employeeSnap = await getDocs(query(collection(db, 'employees'), where('userId', '==', user.uid)));
-          if (!employeeSnap.empty) {
-            const employeeData = employeeSnap.docs[0].data();
-            finalProfile.role = employeeData.role?.toLowerCase() || finalProfile.role;
-          }
-        } catch (e) {
-          console.warn("[Auth] Error syncing role from employees:", e);
-        }
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      async (docSnap) => {
+        if (!isMounted) return;
 
-        // isOwner is always derived from role — prevents stale/incorrect Firestore data
-        // from granting owner access to editors or vendors.
-        finalProfile.isOwner = finalProfile.role === 'owner';
+        if (docSnap.exists()) {
+          const userData = docSnap.data() as AdminProfile;
 
-        setAdminProfile(finalProfile);
-      } else {
-        // Fallback logic for new users
-        let isMaster = user.email === 'arthurfgalves@gmail.com' || user.email === '15599873676@nextcreatives.co';
+          // Ponto de partida: normaliza role para lowercase
+          let resolvedRole = userData.role?.toLowerCase() || 'editor';
 
-        const defaultProfile: AdminProfile = {
-          name: isMaster ? 'Arthur Fagundes #Owner' : (user.displayName || 'Usuário'),
-          phone: isMaster ? '15599873676' : (user.phoneNumber || ''),
-          avatarUrl: user.photoURL || '',
-          role: isMaster ? 'owner' : 'editor',
-          email: user.email || '',
-          userId: user.uid,
-          isOwner: isMaster
-        };
-        setAdminProfile(defaultProfile);
-
-        // Auto-create profile for master email if it doesn't exist
-        if (isMaster) {
-          setDoc(userDocRef, defaultProfile).catch(err => {
-            console.warn("Could not auto-create master profile:", err);
-          });
-
-          // Also ensure they are in the employees collection so they appear in the team list
-          const employeeDocRef = doc(db, 'employees', user.uid);
-          getDocs(query(collection(db, 'employees'), where('userId', '==', user.uid))).then(snap => {
-            if (snap.empty) {
-              setDoc(employeeDocRef, {
-                name: 'Arthur Fagundes #Owner',
-                role: 'Owner',
-                login: '15599873676',
-                password: '963369',
-                userId: user.uid,
-                lastLogin: new Date().toLocaleString(),
-                initials: 'AF',
-                isOwner: true,
-                createdAt: new Date().toISOString()
-              }).catch(err => console.warn("Error creating owner employee doc:", err));
+          // Override com a role da coleção `employees` (gerenciada em Settings)
+          // Esta é considerada mais confiável que o documento `users`.
+          try {
+            const employeeSnap = await getDocs(
+              query(collection(db, 'employees'), where('userId', '==', user.uid))
+            );
+            if (!employeeSnap.empty) {
+              const employeeData = employeeSnap.docs[0].data();
+              resolvedRole = employeeData.role?.toLowerCase() || resolvedRole;
             }
-          });
-        }
-      }
-      setLoading(false);
-    }, (error) => {
-      console.error('[Auth] Erro no listener de perfil Firestore:', error);
-      setLoading(false);
-    });
+          } catch (e) {
+            console.warn('[useAuth] Erro ao sincronizar role de employees:', e);
+          }
 
-    return () => unsubscribe();
+          if (!isMounted) return; // pode ter desmontado durante o await
+
+          const isOwner = deriveIsOwner(resolvedRole);
+
+          // Log temporário para diagnóstico — remover em produção
+          console.log('[useAuth] isOwner:', isOwner, '| role:', resolvedRole, '| uid:', user.uid);
+
+          const finalProfile: AdminProfile = {
+            ...userData,
+            role: resolvedRole,
+            isOwner,
+          };
+
+          setAdminProfile(finalProfile);
+
+        } else {
+          // Fallback: usuário sem documento em `users/`
+          const isMaster =
+            user.email === 'arthurfgalves@gmail.com' ||
+            user.email === '15599873676@nextcreatives.co';
+
+          const resolvedRole = isMaster ? 'owner' : 'editor';
+          const isOwner      = deriveIsOwner(resolvedRole);
+
+          console.log('[useAuth] isOwner (fallback):', isOwner, '| role:', resolvedRole);
+
+          const defaultProfile: AdminProfile = {
+            name:     isMaster ? 'Arthur Fagundes #Owner' : (user.displayName || 'Usuário'),
+            phone:    isMaster ? '15599873676' : (user.phoneNumber || ''),
+            avatarUrl: user.photoURL || '',
+            role:     resolvedRole,
+            email:    user.email || '',
+            userId:   user.uid,
+            isOwner,
+          };
+
+          if (isMounted) setAdminProfile(defaultProfile);
+
+          // Auto-cria documentos para o owner master se não existirem
+          if (isMaster) {
+            setDoc(userDocRef, defaultProfile).catch(err =>
+              console.warn('[useAuth] Erro ao criar perfil master:', err)
+            );
+
+            const employeeDocRef = doc(db, 'employees', user.uid);
+            getDocs(query(collection(db, 'employees'), where('userId', '==', user.uid)))
+              .then(snap => {
+                if (snap.empty) {
+                  setDoc(employeeDocRef, {
+                    name: 'Arthur Fagundes #Owner',
+                    role: 'owner',
+                    login: '15599873676',
+                    password: '963369',
+                    userId: user.uid,
+                    lastLogin: new Date().toLocaleString(),
+                    initials: 'AF',
+                    isOwner: true,
+                    createdAt: new Date().toISOString(),
+                  }).catch(err => console.warn('[useAuth] Erro ao criar employee owner:', err));
+                }
+              });
+          }
+        }
+
+        if (isMounted) setLoading(false);
+      },
+      (error) => {
+        console.error('[useAuth] Erro no listener Firestore:', error);
+        if (isMounted) setLoading(false);
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, [user]);
 
   const updateAdminProfile = async (updates: Partial<AdminProfile>) => {
