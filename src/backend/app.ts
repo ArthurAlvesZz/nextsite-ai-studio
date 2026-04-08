@@ -20,10 +20,8 @@
 
 import express, { Application } from 'express';
 import { createServer as createHttpServer } from 'http';
-import { Server as SocketIOServer, Socket } from 'socket.io';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { admin } from './config/firebase.js';
 import { requireOwner } from './middlewares/auth.js';
 import { logger } from './utils/logger.js';
 
@@ -31,38 +29,10 @@ import { logger } from './utils/logger.js';
 export const app: Application = express();
 export const httpServer = createHttpServer(app);
 
-// ── Socket.IO ─────────────────────────────────────────────────────────────────
-
-/** Map UID → Socket para emits direcionados a usuários específicos. */
-export const userSockets = new Map<string, Socket>();
-
-export const io = new SocketIOServer(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
-});
-
-// Middleware de auth do Socket.IO — verifica token Firebase na handshake
-io.use(async (socket, next) => {
-  const token = socket.handshake.auth?.token as string | undefined;
-  if (!token) return next(new Error('Unauthorized: no token'));
-  try {
-    const decoded = await admin.auth().verifyIdToken(token);
-    (socket as any).uid = decoded.uid;
-    next();
-  } catch {
-    next(new Error('Unauthorized: invalid token'));
-  }
-});
-
-io.on('connection', (socket) => {
-  const uid = (socket as any).uid as string;
-  userSockets.set(uid, socket);
-  logger.info({ uid, event: 'SOCKET_CONNECTED' }, `Socket.IO: cliente conectado — ${uid}`);
-
-  socket.on('disconnect', () => {
-    userSockets.delete(uid);
-    logger.info({ uid, event: 'SOCKET_DISCONNECTED' }, `Socket.IO: cliente desconectado — ${uid}`);
-  });
-});
+// Socket.IO removed — not supported in serverless environment.
+// WhatsApp real-time features require a persistent server (npm run dev).
+export const userSockets = new Map<string, unknown>();
+export const io = null;
 
 // ── Middlewares Globais ───────────────────────────────────────────────────────
 

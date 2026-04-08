@@ -22,5 +22,12 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "server.ts",
+    "services/**",
+    "src/backend/config/whatsapp.config.ts"
+  ]
 }
