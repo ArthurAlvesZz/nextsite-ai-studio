@@ -244,7 +244,10 @@ RULES:
 // ════════════════════════════════════════════════════════════════════════════════
 // startServer — registra rotas e inicia o listener
 // ════════════════════════════════════════════════════════════════════════════════
-async function startServer() {
+// ════════════════════════════════════════════════════════════════════════════════
+// startServer — registra rotas e inicia o listener
+// ════════════════════════════════════════════════════════════════════════════════
+export async function startServer() {
 
   // ── SYSTEM LOG ──────────────────────────────────────────────────────────────
   app.post('/api/system/log', logLimiter, async (req: any, res: any) => {
@@ -928,7 +931,12 @@ Retorne APENAS o JSON.`;
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-startServer().catch(err => {
-  logger.error({ event: 'SERVER_BOOT_FAILED', err: err.message }, 'Falha crítica ao iniciar servidor');
-  process.exit(1);
-});
+// No Vercel environment, we export for serverless and don't listen on a port.
+if (process.env.VERCEL !== '1') {
+  startServer().catch(err => {
+    logger.error({ event: 'SERVER_BOOT_FAILED', err: err.message }, 'Falha crítica ao iniciar servidor');
+    process.exit(1);
+  });
+}
+
+export { app, httpServer };

@@ -31,7 +31,7 @@ export const httpServer = createHttpServer(app);
 
 // Socket.IO removed — not supported in serverless environment.
 // WhatsApp real-time features require a persistent server (npm run dev).
-export const userSockets = new Map<string, unknown>();
+export const userSockets = new Map<string, any>();
 export const io = null;
 
 // ── Middlewares Globais ───────────────────────────────────────────────────────

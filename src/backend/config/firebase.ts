@@ -55,9 +55,18 @@ function initAdmin(): void {
     // 1. FIREBASE_SERVICE_ACCOUNT — JSON string (Vercel / ambientes cloud sem filesystem)
     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (serviceAccountJson) {
-      const serviceAccount = JSON.parse(serviceAccountJson);
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount), projectId });
-      logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'env_json' }, 'Firebase Admin iniciado via FIREBASE_SERVICE_ACCOUNT (JSON env var)');
+      try {
+        const serviceAccount = JSON.parse(serviceAccountJson);
+        admin.initializeApp({ credential: admin.credential.cert(serviceAccount), projectId });
+        logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'env_json' }, 'Firebase Admin iniciado via FIREBASE_SERVICE_ACCOUNT (JSON env var)');
+      } catch (jsonErr: any) {
+        logger.error({ 
+          event: 'FIREBASE_ADMIN_PARSE_ERROR', 
+          err: jsonErr.message,
+          hint: 'Verifique se a variável FIREBASE_SERVICE_ACCOUNT é uma string JSON válida e se as quebras de linha estao escapadas corretamente com \\n.'
+        }, 'Falha ao processar FIREBASE_SERVICE_ACCOUNT como JSON.');
+        throw jsonErr;
+      }
     } else if (credEnv) {
       // 2. GOOGLE_APPLICATION_CREDENTIALS — caminho para arquivo (dev local / GCP)
       const cred = admin.credential.cert(credEnv);
@@ -71,11 +80,21 @@ function initAdmin(): void {
       logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'service_account_file' }, 'Firebase Admin iniciado via service-account.json');
     } else {
       // 4. Fallback: identidade padrão (GCP / Cloud Run com ADC configurado)
+      if (!projectId) {
+        logger.warn({ event: 'FIREBASE_ADMIN_INIT_INCOMPLETE', hint: 'Nenhuma credencial encontrada e projectId ausente.' });
+      }
       admin.initializeApp({ projectId });
       logger.info({ event: 'FIREBASE_ADMIN_INIT', source: 'default_credentials' }, 'Firebase Admin iniciado com credenciais padrão (ADC)');
     }
   } catch (err: any) {
-    logger.error({ event: 'FIREBASE_ADMIN_INIT_ERROR', err: err.message }, 'Falha ao inicializar Firebase Admin');
+    logger.error({ 
+      event: 'FIREBASE_ADMIN_INIT_ERROR', 
+      err: err.message,
+      env_present: {
+        FIREBASE_SERVICE_ACCOUNT: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+        GOOGLE_APPLICATION_CREDENTIALS: !!process.env.GOOGLE_APPLICATION_CREDENTIALS
+      }
+    }, 'Falha ao inicializar Firebase Admin');
     throw err;
   }
 }
