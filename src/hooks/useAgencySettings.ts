@@ -16,6 +16,15 @@ export interface WorkflowStep {
   description: string;
 }
 
+export interface PricingPlan {
+  name: string;
+  price: string;
+  description?: string;
+  highlighted?: boolean;
+  features: string[];
+  ctaLabel?: string;
+}
+
 export interface AgencySettings {
   heroTitle: string;
   heroDescription: string;
@@ -26,6 +35,7 @@ export interface AgencySettings {
   workflowSteps: WorkflowStep[];
   whatsappMockupImage1: string;
   whatsappMockupImage2: string;
+  pricingPlans: PricingPlan[];
 }
 
 const DEFAULT_SETTINGS: AgencySettings = {
@@ -72,7 +82,51 @@ const DEFAULT_SETTINGS: AgencySettings = {
     }
   ],
   whatsappMockupImage1: "https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&q=80&w=400",
-  whatsappMockupImage2: "https://images.unsplash.com/photo-1577803645773-f96470509666?auto=format&fit=crop&q=80&w=400"
+  whatsappMockupImage2: "https://images.unsplash.com/photo-1577803645773-f96470509666?auto=format&fit=crop&q=80&w=400",
+  pricingPlans: [
+    {
+      name: "Start",
+      price: "297",
+      description: "Para quem quer começar com conteúdo de qualidade.",
+      features: [
+        "4 vídeos por mês",
+        "Edição cinematográfica",
+        "Entrega em 5 dias úteis",
+        "Suporte via WhatsApp",
+        "1 revisão por vídeo"
+      ]
+    },
+    {
+      name: "Growth",
+      price: "497",
+      description: "Para marcas que querem escalar com consistência.",
+      highlighted: true,
+      features: [
+        "10 vídeos por mês",
+        "IA Generativa premium",
+        "Entrega em 3 dias úteis",
+        "Gerente de conta dedicado",
+        "Reels + Stories + Feed",
+        "2 revisões por vídeo",
+        "Relatório mensal de performance"
+      ]
+    },
+    {
+      name: "Scale",
+      price: "897",
+      description: "Produção em escala industrial para grandes operações.",
+      features: [
+        "20 vídeos por mês",
+        "Produção cinematográfica completa",
+        "Entrega em 24 horas",
+        "Estratégia de conteúdo inclusa",
+        "Distribuição multiplataforma",
+        "Revisões ilimitadas",
+        "Relatório de performance avançado",
+        "Suporte prioritário 24/7"
+      ]
+    }
+  ]
 };
 
 export function useAgencySettings() {
@@ -80,12 +134,9 @@ export function useAgencySettings() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // If no user is logged in, use 'global' settings for the public landing page.
-    // If a user is logged in, use their specific settings.
     const docId = auth.currentUser ? auth.currentUser.uid : 'global';
     const docRef = doc(db, 'settings', docId);
-    
-    // Initialize default settings if they don't exist
+
     const initSettings = async () => {
       try {
         const docSnap = await getDoc(docRef);
@@ -100,12 +151,14 @@ export function useAgencySettings() {
         handleFirestoreError(e, OperationType.GET, `settings/${docId}`);
       }
     };
-    
+
     initSettings();
 
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
-        setSettings(docSnap.data() as AgencySettings);
+        const data = docSnap.data() as Partial<AgencySettings>;
+        // Merge with defaults so new fields (like pricingPlans) are always present
+        setSettings({ ...DEFAULT_SETTINGS, ...data });
       }
       setLoading(false);
     }, (error) => {
